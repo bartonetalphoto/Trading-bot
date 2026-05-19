@@ -1,4 +1,4 @@
-const CACHE = 'bottrader-v3';
+const CACHE = 'bottrader-v4';
 const ASSETS = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {

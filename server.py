@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
-from backtesting import compare_backtests, config_from_payload, run_backtest
+from backtesting import compare_backtests, config_from_payload, optimize_backtests, run_backtest
 from bot_service import (
     bot_to_dict,
     create_bot,
@@ -166,6 +166,23 @@ def compare_backtest(payload: dict = Body(...)):
         result["trades"] = result.get("trades", [])[:20]
         result["equity_curve"] = result.get("equity_curve", [])[-80:]
     return JSONResponse({"pair": pair, "candle_count": len(candles), "results": results})
+
+
+@app.post("/backtest/optimize")
+def optimize_backtest(payload: dict = Body(...)):
+    pair = str(payload.get("pair") or "BTCZAR").upper().replace("/", "")
+    interval = int(payload.get("candle_interval") or 3600)
+    limit = int(payload.get("candle_limit") or 300)
+    result_limit = int(payload.get("result_limit") or 8)
+    client = get_exchange_client(str(payload.get("exchange") or "valr"), VALR_API_KEY, VALR_API_SECRET)
+    candles = client.get_candles(pair, interval=interval, limit=limit)
+    results = optimize_backtests(candles, config_from_payload(payload), limit=result_limit)
+    return JSONResponse({
+        "pair": pair,
+        "candle_count": len(candles),
+        "train_pct": 70,
+        "results": results,
+    })
 
 
 @app.get("/config")

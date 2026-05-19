@@ -183,6 +183,8 @@
   .panel { margin: 0 16px 12px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .bt-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .bt-actions.three { grid-template-columns: repeat(3, 1fr); }
+  .bt-actions.three .create-btn, .bt-actions.three .secondary-btn { padding: 13px 8px; font-size: 14px; }
   .secondary-btn { width: 100%; padding: 15px; background: var(--surface2); color: var(--text);
     border: 1px solid var(--border); border-radius: 8px; font-family: var(--font-display); font-size: 16px; font-weight: 700; cursor: pointer; }
   .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
@@ -438,10 +440,19 @@
         <label class="form-label">Candle hours</label>
         <input class="form-input" id="bt-hours" type="number" value="1" min="1" max="24"/>
       </div>
+      <div class="form-group">
+        <label class="form-label">Fee %</label>
+        <input class="form-input" id="bt-fee" type="number" value="0.10" min="0" max="2" step="0.01"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Slippage %</label>
+        <input class="form-input" id="bt-slip" type="number" value="0.05" min="0" max="2" step="0.01"/>
+      </div>
     </div>
-    <div class="bt-actions">
+    <div class="bt-actions three">
       <button class="create-btn" onclick="runBacktest(false)">Run</button>
       <button class="secondary-btn" onclick="runBacktest(true)">Compare</button>
+      <button class="secondary-btn" onclick="optimizeBacktest()">Optimize</button>
     </div>
     <div class="status-line" id="bt-status"></div>
   </div>
@@ -542,10 +553,10 @@ function goBack() { showScreen('screen-home'); renderHome(); }
 function showCreate() { prevScreen = 'home'; showScreen('screen-create'); }
 
 // ── API calls ─────────────────────────────────────────────────────────────────
-async function apiFetch(path, options = {}) {
+async function apiFetch(path, options = {}, timeoutMs = 8000) {
   if (!API_URL) return null;
   const url = API_URL.replace(/\/$/, '') + path;
-  const r = await fetch(url, { signal: AbortSignal.timeout(8000), ...options });
+  const r = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), ...options });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
@@ -801,7 +812,9 @@ function backtestPayload() {
     trade_amount_pct: (parseFloat(document.getElementById('bt-trade').value) || 95) / 100,
     max_position_pct: (parseFloat(document.getElementById('bt-maxpos').value) || 95) / 100,
     stop_loss_pct: (parseFloat(document.getElementById('bt-sl').value) || 5) / 100,
-    take_profit_pct: (parseFloat(document.getElementById('bt-tp').value) || 8) / 100
+    take_profit_pct: (parseFloat(document.getElementById('bt-tp').value) || 8) / 100,
+    fee_pct: (parseFloat(document.getElementById('bt-fee').value) || 0) / 100,
+    slippage_pct: (parseFloat(document.getElementById('bt-slip').value) || 0) / 100
   };
 }
 
@@ -834,6 +847,29 @@ async function runBacktest(compare) {
   }
 }
 
+async function optimizeBacktest() {
+  if (!API_URL) {
+    alert('Connect to Railway first in Settings.');
+    return;
+  }
+  const status = document.getElementById('bt-status');
+  status.textContent = 'Optimizing strategy candidates...';
+  document.getElementById('bt-compare').innerHTML = '';
+  try {
+    const result = await apiFetch('/backtest/optimize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...backtestPayload(), result_limit: 8 })
+    }, 30000);
+    renderOptimization(result);
+    const best = (result.results || [])[0];
+    if (best?.validation) renderBacktestResult({ ...best.validation, ...best, ...best.validation });
+    status.textContent = 'Optimized ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    status.textContent = 'Optimization failed: ' + e.message;
+  }
+}
+
 function renderBacktestResult(result) {
   backtestResult = result;
   const good = (result.pnl || 0) >= 0;
@@ -849,7 +885,7 @@ function renderBacktestResult(result) {
       <div class="result-card"><div class="metric-label">Final value</div><div class="metric-value">${fmtZAR(result.final_value || 0)}</div></div>
       <div class="result-card"><div class="metric-label">P&L</div><div class="metric-value ${good ? 'green' : 'red'}">${(result.pnl || 0) >= 0 ? '+' : ''}${fmtZAR(result.pnl || 0)}</div><div class="metric-sub">${signedPct(result.pnl_pct)}</div></div>
       <div class="result-card"><div class="metric-label">Win rate</div><div class="metric-value">${fmtPct(result.win_rate)}</div><div class="metric-sub">${result.exit_trades || 0} exits</div></div>
-      <div class="result-card"><div class="metric-label">Max drawdown</div><div class="metric-value red">${fmtPct(result.max_drawdown_pct)}</div></div>
+      <div class="result-card"><div class="metric-label">Max drawdown</div><div class="metric-value red">${fmtPct(result.max_drawdown_pct)}</div><div class="metric-sub">fees ${fmtZAR(result.fees_paid || 0)}</div></div>
     </div>
     <div class="bt-chart-wrap"><canvas id="bt-chart" aria-label="Backtest equity chart"></canvas></div>
     <div class="bt-actions">
@@ -910,6 +946,37 @@ function renderCompare(data) {
   window.btCompareResults = results;
 }
 
+function renderOptimization(data) {
+  const results = data.results || [];
+  document.getElementById('bt-compare').innerHTML = `<div class="section-title">Optimized candidates</div>` + (
+    results.length ? results.map((r, idx) => {
+      const v = r.validation || {};
+      const good = (v.pnl || 0) >= 0;
+      return `<div class="compare-card ${idx === 0 ? 'best' : ''}" onclick="renderOptimizedCandidate(${idx})">
+        <div class="compare-top">
+          <div>
+            <div class="compare-name">${idx === 0 ? 'Best · ' : ''}${esc(r.strategy_label || r.strategy)}</div>
+            <div class="compare-meta">Score ${Number(r.score || 0).toFixed(2)} · Train ${signedPct(r.train?.pnl_pct)} · Validation ${signedPct(v.pnl_pct)}</div>
+          </div>
+          <div class="trade-profit ${good ? 'green' : 'red'}">${signedPct(v.pnl_pct)}</div>
+        </div>
+        <div class="compare-stats">
+          <div><div class="stat-label">Risk</div><div class="stat-val">${fmtPct((r.trade_amount_pct || 0) * 100)}</div></div>
+          <div><div class="stat-label">SL / TP</div><div class="stat-val">${fmtPct((r.stop_loss_pct || 0) * 100)} / ${fmtPct((r.take_profit_pct || 0) * 100)}</div></div>
+          <div><div class="stat-label">Drawdown</div><div class="stat-val">${fmtPct(v.max_drawdown_pct)}</div></div>
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty" style="padding:28px;"><div class="empty-sub">No valid optimization candidates</div></div>'
+  );
+  window.btOptimizedResults = results;
+}
+
+function renderOptimizedCandidate(idx) {
+  const candidate = (window.btOptimizedResults || [])[idx];
+  if (!candidate?.validation) return;
+  renderBacktestResult({ ...candidate.validation, ...candidate, ...candidate.validation });
+}
+
 function renderBacktestTrades(trades) {
   document.getElementById('bt-trades').innerHTML = `<div class="section-title">Backtest trades</div>` + (
     trades.length ? trades.slice(-40).reverse().map(t => {
@@ -943,6 +1010,8 @@ async function deployBacktestBot() {
         max_position_pct: backtestResult.max_position_pct || payload.max_position_pct,
         stop_loss_pct: backtestResult.stop_loss_pct || payload.stop_loss_pct,
         take_profit_pct: backtestResult.take_profit_pct || payload.take_profit_pct,
+        fee_pct: backtestResult.fee_pct || payload.fee_pct,
+        slippage_pct: backtestResult.slippage_pct || payload.slippage_pct,
         fast_ema_period: backtestResult.fast_ema_period,
         slow_ema_period: backtestResult.slow_ema_period
       })

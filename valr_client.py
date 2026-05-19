@@ -8,6 +8,7 @@ Docs: https://docs.valr.com
 import hashlib
 import hmac
 import time
+from datetime import datetime, timezone
 import requests
 
 
@@ -79,7 +80,7 @@ class ValrClient:
                     "close":  float(c.get("close", 0)),
                     "volume": float(c.get("volume", 0)),
                 })
-            return candles
+            return _sort_candles_oldest_first(candles)
         # Fallback: build close prices from recent trades
         return self._candles_from_ticker(pair, limit)
 
@@ -89,7 +90,8 @@ class ValrClient:
         resp = self.session.get(BASE_URL + path, timeout=30)
         resp.raise_for_status()
         trades = resp.json()
-        return [{"close": float(t["price"]), "timestamp": t["tradedAt"]} for t in trades]
+        candles = [{"close": float(t["price"]), "timestamp": t["tradedAt"]} for t in trades]
+        return _sort_candles_oldest_first(candles)
 
     def get_ticker(self, pair: str) -> dict:
         """Get current best bid/ask and last trade price."""
@@ -130,3 +132,22 @@ class ValrClient:
             "timeInForce": "FOK",
         }
         return self._post("/v1/orders/market", body)
+
+
+def _sort_candles_oldest_first(candles: list[dict]) -> list[dict]:
+    timestamps = [_timestamp_value(candle.get("timestamp")) for candle in candles]
+    if len(candles) <= 1 or any(value is None for value in timestamps):
+        return candles
+    return [candle for _, candle in sorted(zip(timestamps, candles), key=lambda item: item[0])]
+
+
+def _timestamp_value(raw: str | None) -> float | None:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
