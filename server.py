@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
-from backtesting import BacktestConfig, run_backtest
+from backtesting import compare_backtests, config_from_payload, run_backtest
 from bot_service import (
     bot_to_dict,
     create_bot,
@@ -146,20 +146,26 @@ def backtest(payload: dict = Body(...)):
     limit = int(payload.get("candle_limit") or 300)
     client = get_exchange_client(str(payload.get("exchange") or "valr"), VALR_API_KEY, VALR_API_SECRET)
     candles = client.get_candles(pair, interval=interval, limit=limit)
-    result = run_backtest(
-        candles,
-        BacktestConfig(
-            starting_capital=float(payload.get("starting_capital") or payload.get("capital") or 1000.0),
-            trade_amount_pct=float(payload.get("trade_amount_pct") or 0.95),
-            stop_loss_pct=float(payload.get("stop_loss_pct") or 0.05),
-            take_profit_pct=float(payload.get("take_profit_pct") or 0.08),
-            fast_ema_period=int(payload.get("fast_ema_period") or 9),
-            slow_ema_period=int(payload.get("slow_ema_period") or 21),
-        ),
-    )
+    result = run_backtest(candles, config_from_payload(payload))
     result["pair"] = pair
     result["candle_count"] = len(candles)
     return JSONResponse(result)
+
+
+@app.post("/backtest/compare")
+def compare_backtest(payload: dict = Body(...)):
+    pair = str(payload.get("pair") or "BTCZAR").upper().replace("/", "")
+    interval = int(payload.get("candle_interval") or 3600)
+    limit = int(payload.get("candle_limit") or 300)
+    client = get_exchange_client(str(payload.get("exchange") or "valr"), VALR_API_KEY, VALR_API_SECRET)
+    candles = client.get_candles(pair, interval=interval, limit=limit)
+    results = compare_backtests(candles, config_from_payload(payload))
+    for result in results:
+        result["pair"] = pair
+        result["candle_count"] = len(candles)
+        result["trades"] = result.get("trades", [])[:20]
+        result["equity_curve"] = result.get("equity_curve", [])[-80:]
+    return JSONResponse({"pair": pair, "candle_count": len(candles), "results": results})
 
 
 @app.get("/config")

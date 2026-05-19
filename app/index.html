@@ -178,6 +178,23 @@
     border: 1px solid rgba(0,212,170,0.2); border-radius: 12px; font-size: 12px; }
   .api-banner-label { color: var(--muted); margin-bottom: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
   .api-url { color: var(--green); word-break: break-all; font-size: 11px; }
+
+  /* ── Backtesting ── */
+  .panel { margin: 0 16px 12px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .bt-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .secondary-btn { width: 100%; padding: 15px; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; font-family: var(--font-display); font-size: 16px; font-weight: 700; cursor: pointer; }
+  .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .result-card { background: var(--surface2); border-radius: 8px; padding: 13px; min-height: 78px; }
+  .bt-chart-wrap { height: 150px; margin-top: 12px; }
+  .compare-card { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 14px; margin: 0 16px 10px; }
+  .compare-card.best { border-color: rgba(0,212,170,0.55); background: rgba(0,212,170,0.06); }
+  .compare-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+  .compare-name { font-family: var(--font-display); font-size: 16px; font-weight: 700; }
+  .compare-meta { color: var(--muted); font-size: 10px; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .compare-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .status-line { color: var(--muted); font-size: 12px; padding: 4px 0 0; min-height: 20px; }
 </style>
 </head>
 <body>
@@ -336,6 +353,89 @@
   </div>
 </div>
 
+<!-- ══ BACKTEST SCREEN ═════════════════════════════════════════ -->
+<div id="screen-backtest" class="screen">
+  <div class="header">
+    <div>
+      <div class="header-title" style="font-size:24px;">Backtest</div>
+      <div class="header-sub" id="bt-sub">Strategy lab</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="form-group">
+      <label class="form-label">Market</label>
+      <div class="option-grid" id="bt-market-opts">
+        <button class="option-btn selected" data-v="BTCZAR" onclick="pick(this,'bt-market-opts')">
+          <div class="option-btn-title">BTC / ZAR</div><div class="option-btn-sub">Bitcoin</div>
+        </button>
+        <button class="option-btn" data-v="ETHZAR" onclick="pick(this,'bt-market-opts')">
+          <div class="option-btn-title">ETH / ZAR</div><div class="option-btn-sub">Ethereum</div>
+        </button>
+        <button class="option-btn" data-v="SOLZAR" onclick="pick(this,'bt-market-opts')">
+          <div class="option-btn-title">SOL / ZAR</div><div class="option-btn-sub">Solana</div>
+        </button>
+        <button class="option-btn" data-v="XRPZAR" onclick="pick(this,'bt-market-opts')">
+          <div class="option-btn-title">XRP / ZAR</div><div class="option-btn-sub">Ripple</div>
+        </button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Strategy</label>
+      <div class="option-grid" id="bt-strat-opts">
+        <button class="option-btn selected" data-v="trend" onclick="pick(this,'bt-strat-opts')">
+          <div class="option-btn-title">Trend follow</div><div class="option-btn-sub">EMA 9/21</div>
+        </button>
+        <button class="option-btn" data-v="scalp" onclick="pick(this,'bt-strat-opts')">
+          <div class="option-btn-title">Scalping</div><div class="option-btn-sub">EMA 5/13</div>
+        </button>
+        <button class="option-btn" data-v="grid" onclick="pick(this,'bt-strat-opts')">
+          <div class="option-btn-title">Grid range</div><div class="option-btn-sub">Range bands</div>
+        </button>
+        <button class="option-btn" data-v="dca" onclick="pick(this,'bt-strat-opts')">
+          <div class="option-btn-title">DCA dip</div><div class="option-btn-sub">Dip entries</div>
+        </button>
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Capital</label>
+        <input class="form-input" id="bt-capital" type="number" value="1000" min="100"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Candles</label>
+        <input class="form-input" id="bt-candles" type="number" value="300" min="60" max="1000"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Trade size %</label>
+        <input class="form-input" id="bt-trade" type="number" value="95" min="5" max="100"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Stop-loss %</label>
+        <input class="form-input" id="bt-sl" type="number" value="5" min="1" max="30"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Take-profit %</label>
+        <input class="form-input" id="bt-tp" type="number" value="8" min="1" max="50"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Candle hours</label>
+        <input class="form-input" id="bt-hours" type="number" value="1" min="1" max="24"/>
+      </div>
+    </div>
+    <div class="bt-actions">
+      <button class="create-btn" onclick="runBacktest(false)">Run</button>
+      <button class="secondary-btn" onclick="runBacktest(true)">Compare</button>
+    </div>
+    <div class="status-line" id="bt-status"></div>
+  </div>
+
+  <div id="bt-result"></div>
+  <div id="bt-compare"></div>
+  <div id="bt-trades"></div>
+  <div style="height:20px;"></div>
+</div>
+
 <!-- ══ SETTINGS SCREEN ══════════════════════════════════════════ -->
 <div id="screen-settings" class="screen">
   <div class="header">
@@ -380,9 +480,9 @@
     <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
     Home
   </button>
-  <button class="nav-btn" id="nav-trades" onclick="navTo('trades')">
+  <button class="nav-btn" id="nav-backtest" onclick="navTo('backtest')">
     <svg viewBox="0 0 24 24"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
-    Activity
+    Backtest
   </button>
   <button class="nav-btn" id="nav-settings" onclick="navTo('settings')">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -401,6 +501,8 @@ let liveStatus  = null;
 let allTrades   = [];
 let detailBot   = null;
 let detailChart = null;
+let backtestChart = null;
+let backtestResult = null;
 let prevScreen  = 'home';
 let historyMap  = {};   // botId -> portfolio history array
 
@@ -410,7 +512,8 @@ function saveBots() {}
 function navTo(tab) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('nav-' + tab).classList.add('active');
-  if (tab === 'home' || tab === 'trades') { showScreen('screen-home'); renderHome(); }
+  if (tab === 'home') { showScreen('screen-home'); renderHome(); }
+  if (tab === 'backtest') { showScreen('screen-backtest'); }
   if (tab === 'settings') { showScreen('screen-settings'); loadConfig(); }
 }
 
@@ -671,6 +774,168 @@ async function createBot() {
   }
 }
 
+// ── Backtesting ───────────────────────────────────────────────────────────────
+function backtestPayload() {
+  return {
+    pair: document.querySelector('#bt-market-opts .selected')?.dataset.v || 'BTCZAR',
+    strategy: document.querySelector('#bt-strat-opts .selected')?.dataset.v || 'trend',
+    starting_capital: parseFloat(document.getElementById('bt-capital').value) || 1000,
+    candle_limit: parseInt(document.getElementById('bt-candles').value, 10) || 300,
+    candle_interval: (parseInt(document.getElementById('bt-hours').value, 10) || 1) * 3600,
+    trade_amount_pct: (parseFloat(document.getElementById('bt-trade').value) || 95) / 100,
+    stop_loss_pct: (parseFloat(document.getElementById('bt-sl').value) || 5) / 100,
+    take_profit_pct: (parseFloat(document.getElementById('bt-tp').value) || 8) / 100
+  };
+}
+
+async function runBacktest(compare) {
+  if (!API_URL) {
+    alert('Connect to Railway first in Settings.');
+    return;
+  }
+  const status = document.getElementById('bt-status');
+  status.textContent = compare ? 'Comparing strategies...' : 'Running backtest...';
+  document.getElementById('bt-compare').innerHTML = '';
+  try {
+    const payload = backtestPayload();
+    const result = await apiFetch(compare ? '/backtest/compare' : '/backtest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (compare) {
+      renderCompare(result);
+      const best = (result.results || [])[0];
+      if (best) renderBacktestResult(best);
+    } else {
+      renderBacktestResult(result);
+      document.getElementById('bt-compare').innerHTML = '';
+    }
+    status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    status.textContent = 'Backtest failed: ' + e.message;
+  }
+}
+
+function renderBacktestResult(result) {
+  backtestResult = result;
+  const good = (result.pnl || 0) >= 0;
+  document.getElementById('bt-result').innerHTML = `<div class="panel">
+    <div class="bot-header">
+      <div>
+        <div class="bot-name">${esc(result.strategy_label || result.strategy || 'Backtest')}</div>
+        <div class="bot-pair">${esc(result.pair || backtestPayload().pair)} · ${result.candle_count || 0} candles</div>
+      </div>
+      <span class="badge ${good ? 'badge-buy' : 'badge-sell'}">${good ? 'PROFIT' : 'LOSS'}</span>
+    </div>
+    <div class="result-grid">
+      <div class="result-card"><div class="metric-label">Final value</div><div class="metric-value">${fmtZAR(result.final_value || 0)}</div></div>
+      <div class="result-card"><div class="metric-label">P&L</div><div class="metric-value ${good ? 'green' : 'red'}">${(result.pnl || 0) >= 0 ? '+' : ''}${fmtZAR(result.pnl || 0)}</div><div class="metric-sub">${signedPct(result.pnl_pct)}</div></div>
+      <div class="result-card"><div class="metric-label">Win rate</div><div class="metric-value">${fmtPct(result.win_rate)}</div><div class="metric-sub">${result.exit_trades || 0} exits</div></div>
+      <div class="result-card"><div class="metric-label">Max drawdown</div><div class="metric-value red">${fmtPct(result.max_drawdown_pct)}</div></div>
+    </div>
+    <div class="bt-chart-wrap"><canvas id="bt-chart" aria-label="Backtest equity chart"></canvas></div>
+    <div class="bt-actions">
+      <button class="secondary-btn" onclick="deployBacktestBot()">Deploy Paper Bot</button>
+      <button class="secondary-btn" onclick="runBacktest(true)">Compare Again</button>
+    </div>
+  </div>`;
+  renderBacktestChart(result);
+  renderBacktestTrades(result.trades || []);
+}
+
+function renderBacktestChart(result) {
+  if (backtestChart) { backtestChart.destroy(); backtestChart = null; }
+  const curve = result.equity_curve || [];
+  const values = curve.length ? curve.map(p => p.value) : [result.starting_capital || 0, result.final_value || 0];
+  const ctx = document.getElementById('bt-chart')?.getContext('2d');
+  if (!ctx) return;
+  backtestChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: values.map((_, i) => i),
+      datasets: [{
+        data: values,
+        borderColor: (result.pnl || 0) >= 0 ? '#00d4aa' : '#e74c3c',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.35,
+        fill: false
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { display: false }, y: { display: false } }
+    }
+  });
+}
+
+function renderCompare(data) {
+  const results = data.results || [];
+  document.getElementById('bt-compare').innerHTML = `<div class="section-title">Strategy comparison</div>` + results.map((r, idx) => {
+    const good = (r.pnl || 0) >= 0;
+    return `<div class="compare-card ${idx === 0 ? 'best' : ''}" onclick="renderBacktestResult(window.btCompareResults[${idx}])">
+      <div class="compare-top">
+        <div>
+          <div class="compare-name">${idx === 0 ? 'Best · ' : ''}${esc(r.strategy_label || r.strategy)}</div>
+          <div class="compare-meta">Drawdown ${fmtPct(r.max_drawdown_pct)} · ${r.total_trades || 0} trades</div>
+        </div>
+        <div class="trade-profit ${good ? 'green' : 'red'}">${signedPct(r.pnl_pct)}</div>
+      </div>
+      <div class="compare-stats">
+        <div><div class="stat-label">Value</div><div class="stat-val">${fmtZAR(r.final_value || 0)}</div></div>
+        <div><div class="stat-label">Win</div><div class="stat-val">${fmtPct(r.win_rate)}</div></div>
+        <div><div class="stat-label">P&L</div><div class="stat-val ${good ? 'green' : 'red'}">${(r.pnl || 0) >= 0 ? '+' : ''}${fmtZAR(r.pnl || 0)}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+  window.btCompareResults = results;
+}
+
+function renderBacktestTrades(trades) {
+  document.getElementById('bt-trades').innerHTML = `<div class="section-title">Backtest trades</div>` + (
+    trades.length ? trades.slice(-40).reverse().map(t => {
+      const p = t.profit;
+      const col = p == null ? 'var(--muted)' : p >= 0 ? 'var(--green)' : 'var(--red)';
+      return `<div class="trade-row">
+        <div>
+          <div class="trade-type">${esc(t.type)}</div>
+          <div class="trade-meta">Candle #${t.candle || '-'} · ${t.timestamp ? esc(String(t.timestamp).slice(0,16)) : 'historical'}</div>
+        </div>
+        <div class="trade-profit" style="color:${col}">${p != null ? (p >= 0 ? '+' : '') + fmtZAR(p) : 'ENTRY'}</div>
+      </div>`;
+    }).join('') : '<div class="empty" style="padding:28px;"><div class="empty-sub">No simulated trades</div></div>'
+  );
+}
+
+async function deployBacktestBot() {
+  if (!backtestResult) return;
+  const payload = backtestPayload();
+  try {
+    await apiFetch('/bots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: (backtestResult.strategy_label || payload.strategy) + ' ' + payload.pair + ' Bot',
+        pair: payload.pair,
+        strategy: backtestResult.strategy || payload.strategy,
+        mode: 'paper',
+        starting_capital: payload.starting_capital,
+        trade_amount_pct: backtestResult.trade_amount_pct || payload.trade_amount_pct,
+        stop_loss_pct: backtestResult.stop_loss_pct || payload.stop_loss_pct,
+        take_profit_pct: backtestResult.take_profit_pct || payload.take_profit_pct,
+        fast_ema_period: backtestResult.fast_ema_period,
+        slow_ema_period: backtestResult.slow_ema_period
+      })
+    });
+    await refreshAll();
+    navTo('home');
+  } catch(e) {
+    alert('Could not deploy bot: ' + e.message);
+  }
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 function setApiUrl() {
   const url = prompt('Enter your Railway app URL:\n(e.g. https://valr-bot-xyz.railway.app)', API_URL);
@@ -701,6 +966,15 @@ async function loadConfig() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtZAR(n) {
   return 'R' + Number(n).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtPct(n) {
+  return Number(n || 0).toFixed(2) + '%';
+}
+
+function signedPct(n) {
+  const value = Number(n || 0);
+  return (value >= 0 ? '+' : '') + value.toFixed(2) + '%';
 }
 
 function esc(value) {

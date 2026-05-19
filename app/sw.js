@@ -1,4 +1,4 @@
-const CACHE = 'bottrader-v1';
+const CACHE = 'bottrader-v2';
 const ASSETS = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -20,7 +20,8 @@ self.addEventListener('fetch', e => {
 
   // Always go live for API calls to Railway
   if (url.hostname.includes('railway.app') || url.pathname.startsWith('/status') ||
-      url.pathname.startsWith('/trades') || url.pathname.startsWith('/config')) {
+      url.pathname.startsWith('/trades') || url.pathname.startsWith('/config') ||
+      url.pathname.startsWith('/bots') || url.pathname.startsWith('/backtest')) {
     e.respondWith(fetch(e.request).catch(() => new Response('{"error":"offline"}', {
       headers: { 'Content-Type': 'application/json' }
     })));
