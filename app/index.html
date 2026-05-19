@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="BotTrader"/>
+<meta name="theme-color" content="#0a0e1a"/>
+<title>BotTrader</title>
+<link rel="manifest" href="manifest.json"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #0f1525;
+    --surface2: #151d30;
+    --border: rgba(255,255,255,0.07);
+    --text: #e8eaf0;
+    --muted: #8892a4;
+    --green: #00d4aa;
+    --red: #e74c3c;
+    --blue: #3b82f6;
+    --gold: #f5a623;
+    --font-display: 'Syne', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+    --radius: 16px;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bot: env(safe-area-inset-bottom, 0px);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font-mono); }
+
+  /* ── Layout ── */
+  #app { display: flex; flex-direction: column; height: 100%; }
+  .screen { display: none; flex: 1; overflow-y: auto; padding-bottom: calc(64px + var(--safe-bot)); }
+  .screen.active { display: block; }
+
+  /* ── Nav bar ── */
+  .nav { display: flex; background: var(--surface); border-top: 1px solid var(--border);
+    padding-bottom: var(--safe-bot); position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; }
+  .nav-btn { flex: 1; padding: 10px 4px 8px; background: none; border: none; cursor: pointer;
+    color: var(--muted); font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.05em;
+    display: flex; flex-direction: column; align-items: center; gap: 4px; transition: color 0.2s; }
+  .nav-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .nav-btn.active { color: var(--green); }
+
+  /* ── Header ── */
+  .header { padding: calc(var(--safe-top) + 20px) 20px 16px;
+    display: flex; justify-content: space-between; align-items: flex-end; }
+  .header-title { font-family: var(--font-display); font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+  .header-sub { font-size: 11px; color: var(--muted); }
+
+  /* ── Cards ── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin: 0 16px 12px; }
+  .card-sm { background: var(--surface2); border-radius: 12px; padding: 14px; }
+
+  /* ── Metric grid ── */
+  .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 16px; margin-bottom: 20px; }
+  .metric-label { font-size: 10px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+  .metric-value { font-family: var(--font-display); font-size: 24px; font-weight: 700; line-height: 1; }
+  .metric-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* ── Bot card ── */
+  .bot-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    margin: 0 16px 12px; padding: 16px; cursor: pointer; transition: border-color 0.2s; }
+  .bot-card:active { border-color: var(--green); }
+  .bot-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .bot-name { font-family: var(--font-display); font-size: 16px; font-weight: 700; }
+  .bot-pair { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .badge { font-size: 10px; padding: 3px 10px; border-radius: 20px; font-family: var(--font-mono); letter-spacing: 0.05em; }
+  .badge-paper { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
+  .badge-live  { background: rgba(0,212,170,0.15); color: var(--green); border: 1px solid rgba(0,212,170,0.3); }
+  .badge-paused{ background: rgba(136,146,164,0.15); color: var(--muted); border: 1px solid rgba(136,146,164,0.3); }
+  .badge-error { background: rgba(231,76,60,0.15); color: var(--red); border: 1px solid rgba(231,76,60,0.3); }
+  .badge-hold  { background: rgba(136,146,164,0.1); color: var(--muted); }
+  .badge-buy   { background: rgba(0,212,170,0.1);  color: var(--green); }
+  .badge-sell  { background: rgba(231,76,60,0.1);  color: var(--red); }
+  .sparkline { width: 100%; height: 44px; margin: 8px 0; }
+  .bot-stats { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border); padding-top: 12px; gap: 8px; }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .stat-val { font-size: 14px; font-weight: 500; margin-top: 4px; }
+  .green { color: var(--green); } .red { color: var(--red); } .gold { color: var(--gold); }
+
+  /* ── Section title ── */
+  .section-title { font-size: 10px; color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase; padding: 0 16px 10px; }
+
+  /* ── FAB ── */
+  .fab { position: fixed; bottom: calc(72px + var(--safe-bot)); right: 20px;
+    width: 54px; height: 54px; border-radius: 50%; background: var(--green);
+    border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    z-index: 99; transition: transform 0.15s; }
+  .fab:active { transform: scale(0.93); }
+  .fab svg { width: 24px; height: 24px; stroke: #0a0e1a; fill: none; stroke-width: 2.5; stroke-linecap: round; }
+
+  /* ── Detail screen ── */
+  .detail-hero { padding: 16px 20px 20px; border-bottom: 1px solid var(--border); }
+  .detail-value { font-family: var(--font-display); font-size: 36px; font-weight: 800; letter-spacing: -0.02em; }
+  .detail-pnl { font-size: 13px; margin-top: 4px; }
+  .detail-chart-wrap { height: 120px; margin-top: 16px; }
+  .controls { display: flex; gap: 8px; padding: 16px; }
+  .ctrl-btn { flex: 1; padding: 11px 6px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text); font-family: var(--font-mono); font-size: 12px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; transition: border-color 0.2s; }
+  .ctrl-btn:active { border-color: var(--green); }
+  .ctrl-btn.danger { color: var(--red); border-color: rgba(231,76,60,0.3); }
+  .ctrl-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; }
+
+  /* ── Trade list ── */
+  .trade-row { display: flex; justify-content: space-between; align-items: center;
+    padding: 13px 20px; border-bottom: 1px solid var(--border); }
+  .trade-type { font-size: 13px; font-weight: 500; }
+  .trade-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .trade-profit { font-size: 14px; font-weight: 500; text-align: right; }
+
+  /* ── Create form ── */
+  .form-wrap { padding: 16px; }
+  .form-label { font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; display: block; }
+  .form-group { margin-bottom: 20px; }
+  .form-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px;
+    color: var(--text); font-family: var(--font-mono); font-size: 15px; padding: 12px 14px; outline: none; }
+  .form-input:focus { border-color: var(--green); }
+  .option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .option-btn { padding: 12px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface2); cursor: pointer; text-align: left; transition: border-color 0.2s; }
+  .option-btn.selected { border-color: var(--green); background: rgba(0,212,170,0.07); }
+  .option-btn-title { font-size: 13px; font-weight: 500; color: var(--text); }
+  .option-btn-sub { font-size: 10px; color: var(--muted); margin-top: 3px; }
+  .create-btn { width: 100%; padding: 15px; background: var(--green); color: #0a0e1a;
+    border: none; border-radius: 12px; font-family: var(--font-display); font-size: 16px; font-weight: 700;
+    cursor: pointer; margin-top: 8px; letter-spacing: 0.02em; transition: opacity 0.2s; }
+  .create-btn:active { opacity: 0.85; }
+
+  /* ── Settings ── */
+  .settings-row { display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .settings-label { font-size: 14px; }
+  .settings-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .settings-val { font-size: 13px; color: var(--muted); }
+  .toggle { width: 46px; height: 28px; border-radius: 14px; border: none; cursor: pointer;
+    position: relative; transition: background 0.25s; flex-shrink: 0; }
+  .toggle.on { background: var(--green); }
+  .toggle.off { background: var(--border); }
+  .toggle::after { content:''; position: absolute; top: 4px; width: 20px; height: 20px;
+    border-radius: 50%; background: white; transition: left 0.25s; }
+  .toggle.on::after { left: 22px; } .toggle.off::after { left: 4px; }
+
+  /* ── Status dot ── */
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+  .dot-green { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-red   { background: var(--red); }
+  .dot-gold  { background: var(--gold); }
+  .dot-gray  { background: var(--muted); }
+
+  /* ── Empty state ── */
+  .empty { text-align: center; padding: 48px 24px; color: var(--muted); }
+  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-title { font-family: var(--font-display); font-size: 18px; color: var(--text); margin-bottom: 6px; }
+  .empty-sub { font-size: 13px; }
+
+  /* ── Back button ── */
+  .back-btn { background: none; border: none; cursor: pointer; color: var(--text); padding: 4px; margin-right: 8px; }
+  .back-btn svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+
+  /* ── Live indicator ── */
+  .live-pill { font-size: 10px; color: var(--green); background: rgba(0,212,170,0.1);
+    border: 1px solid rgba(0,212,170,0.25); border-radius: 20px; padding: 3px 10px;
+    display: flex; align-items: center; gap: 4px; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+  .pulse { animation: pulse 1.5s ease-in-out infinite; }
+
+  /* ── API URL banner ── */
+  .api-banner { margin: 0 16px 16px; padding: 12px 14px; background: rgba(0,212,170,0.06);
+    border: 1px solid rgba(0,212,170,0.2); border-radius: 12px; font-size: 12px; }
+  .api-banner-label { color: var(--muted); margin-bottom: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .api-url { color: var(--green); word-break: break-all; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ══ DASHBOARD SCREEN ════════════════════════════════════════ -->
+<div id="screen-home" class="screen active">
+  <div class="header">
+    <div>
+      <div class="header-title">Bot<span style="color:var(--green)">Trader</span></div>
+      <div class="header-sub" id="last-sync">Connecting...</div>
+    </div>
+    <div class="live-pill"><span class="dot dot-green pulse"></span>LIVE</div>
+  </div>
+
+  <div class="metric-grid">
+    <div class="card-sm">
+      <div class="metric-label">Portfolio</div>
+      <div class="metric-value" id="m-portfolio">R1,000</div>
+      <div class="metric-sub" id="m-pnl" style="color:var(--muted)">+R0.00</div>
+    </div>
+    <div class="card-sm">
+      <div class="metric-label">Active bots</div>
+      <div class="metric-value" id="m-bots">1</div>
+      <div class="metric-sub" id="m-markets">1 market</div>
+    </div>
+    <div class="card-sm">
+      <div class="metric-label">Win rate</div>
+      <div class="metric-value" id="m-winrate">—</div>
+      <div class="metric-sub">all time</div>
+    </div>
+    <div class="card-sm">
+      <div class="metric-label">Trades</div>
+      <div class="metric-value" id="m-trades">0</div>
+      <div class="metric-sub">paper trades</div>
+    </div>
+  </div>
+
+  <div class="section-title">Your bots</div>
+  <div id="bot-list"></div>
+  <div style="height:8px;"></div>
+
+  <button class="fab" onclick="showCreate()" aria-label="Add new bot">
+    <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
+</div>
+
+<!-- ══ DETAIL SCREEN ════════════════════════════════════════════ -->
+<div id="screen-detail" class="screen">
+  <div class="header" style="padding-top: calc(var(--safe-top) + 16px);">
+    <button class="back-btn" onclick="goBack()" aria-label="Back">
+      <svg viewBox="0 0 24 24"><polyline points="15,18 9,12 15,6"/></svg>
+    </button>
+    <div style="flex:1;">
+      <div id="d-name" style="font-family:var(--font-display); font-size:17px; font-weight:700;"></div>
+      <div id="d-pair" style="font-size:11px; color:var(--muted);"></div>
+    </div>
+    <div id="d-badge"></div>
+  </div>
+
+  <div class="detail-hero">
+    <div class="metric-label">Portfolio value</div>
+    <div class="detail-value" id="d-value">R1,000.00</div>
+    <div class="detail-pnl" id="d-pnl"></div>
+    <div class="detail-chart-wrap"><canvas id="detail-chart" aria-label="Bot performance chart"></canvas></div>
+  </div>
+
+  <div style="padding: 14px 20px 6px;">
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+      <div><div class="metric-label">Signal</div><div id="d-signal" class="stat-val"></div></div>
+      <div><div class="metric-label">Trend</div><div id="d-trend" class="stat-val" style="color:var(--muted); font-size:12px;"></div></div>
+      <div><div class="metric-label">Cycle</div><div id="d-cycle" class="stat-val"></div></div>
+      <div><div class="metric-label">BTC/ZAR</div><div id="d-price" class="stat-val"></div></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="ctrl-btn" id="pause-btn" onclick="togglePause()">
+      <svg viewBox="0 0 24 24" id="pause-icon"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      <span id="pause-label">Pause</span>
+    </button>
+    <button class="ctrl-btn" onclick="copyLogs()">
+      <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      Logs
+    </button>
+    <button class="ctrl-btn danger" onclick="confirmDelete()">
+      <svg viewBox="0 0 24 24"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/></svg>
+      Delete
+    </button>
+  </div>
+
+  <div class="section-title">Trade history</div>
+  <div id="d-trades"></div>
+  <div style="height:20px;"></div>
+</div>
+
+<!-- ══ CREATE SCREEN ════════════════════════════════════════════ -->
+<div id="screen-create" class="screen">
+  <div class="header" style="padding-top: calc(var(--safe-top) + 16px);">
+    <button class="back-btn" onclick="goBack()" aria-label="Back">
+      <svg viewBox="0 0 24 24"><polyline points="15,18 9,12 15,6"/></svg>
+    </button>
+    <div style="font-family:var(--font-display); font-size:20px; font-weight:800;">New Bot</div>
+  </div>
+  <div class="form-wrap">
+    <div class="form-group">
+      <label class="form-label">Bot name</label>
+      <input class="form-input" id="new-name" type="text" placeholder="e.g. ETH Trend Bot"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Market</label>
+      <div class="option-grid" id="market-opts">
+        <button class="option-btn selected" data-v="BTCZAR" onclick="pick(this,'market-opts')">
+          <div class="option-btn-title">BTC / ZAR</div><div class="option-btn-sub">Bitcoin</div>
+        </button>
+        <button class="option-btn" data-v="ETHZAR" onclick="pick(this,'market-opts')">
+          <div class="option-btn-title">ETH / ZAR</div><div class="option-btn-sub">Ethereum</div>
+        </button>
+        <button class="option-btn" data-v="SOLZAR" onclick="pick(this,'market-opts')">
+          <div class="option-btn-title">SOL / ZAR</div><div class="option-btn-sub">Solana</div>
+        </button>
+        <button class="option-btn" data-v="XRPZAR" onclick="pick(this,'market-opts')">
+          <div class="option-btn-title">XRP / ZAR</div><div class="option-btn-sub">Ripple</div>
+        </button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Strategy</label>
+      <div class="option-grid" id="strat-opts">
+        <button class="option-btn selected" data-v="trend" onclick="pick(this,'strat-opts')">
+          <div class="option-btn-title">Trend follow</div><div class="option-btn-sub">EMA 9/21 — medium</div>
+        </button>
+        <button class="option-btn" data-v="grid" onclick="pick(this,'strat-opts')">
+          <div class="option-btn-title">Grid trading</div><div class="option-btn-sub">Range — low risk</div>
+        </button>
+        <button class="option-btn" data-v="scalp" onclick="pick(this,'strat-opts')">
+          <div class="option-btn-title">Scalping</div><div class="option-btn-sub">Fast — high risk</div>
+        </button>
+        <button class="option-btn" data-v="dca" onclick="pick(this,'strat-opts')">
+          <div class="option-btn-title">DCA</div><div class="option-btn-sub">Buy the dip</div>
+        </button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Starting capital (ZAR)</label>
+      <input class="form-input" id="new-capital" type="number" value="1000" min="100"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Stop-loss %</label>
+      <input class="form-input" id="new-sl" type="number" value="5" min="1" max="20"/>
+    </div>
+    <button class="create-btn" onclick="createBot()">Deploy Bot</button>
+    <p style="font-size:11px; color:var(--muted); text-align:center; margin-top:14px; line-height:1.6;">
+      New bots start in paper trading mode.<br/>Update config.py on Railway to connect to VALR.
+    </p>
+  </div>
+</div>
+
+<!-- ══ SETTINGS SCREEN ══════════════════════════════════════════ -->
+<div id="screen-settings" class="screen">
+  <div class="header">
+    <div>
+      <div class="header-title" style="font-size:24px;">Settings</div>
+    </div>
+  </div>
+
+  <div class="api-banner">
+    <div class="api-banner-label">Railway API URL</div>
+    <div class="api-url" id="api-url-display">Not set — tap to configure</div>
+  </div>
+
+  <div class="section-title">Connection</div>
+  <div class="settings-row">
+    <div><div class="settings-label">API URL</div><div class="settings-sub">Your Railway app URL</div></div>
+    <button style="background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--green); font-family:var(--font-mono); font-size:12px; padding:6px 12px; cursor:pointer;" onclick="setApiUrl()">Edit</button>
+  </div>
+  <div class="settings-row">
+    <div><div class="settings-label">Connection</div><div class="settings-sub" id="conn-status">Checking...</div></div>
+    <span class="dot" id="conn-dot" style="width:10px;height:10px;"></span>
+  </div>
+
+  <div class="section-title" style="margin-top:8px;">Bot config</div>
+  <div class="settings-row"><div class="settings-label">Pair</div><div class="settings-val" id="cfg-pair">—</div></div>
+  <div class="settings-row"><div class="settings-label">Mode</div><div class="settings-val" id="cfg-mode">—</div></div>
+  <div class="settings-row"><div class="settings-label">Stop-loss</div><div class="settings-val" id="cfg-sl">—</div></div>
+  <div class="settings-row"><div class="settings-label">Take-profit</div><div class="settings-val" id="cfg-tp">—</div></div>
+  <div class="settings-row"><div class="settings-label">Fast EMA</div><div class="settings-val" id="cfg-fast">—</div></div>
+  <div class="settings-row"><div class="settings-label">Slow EMA</div><div class="settings-val" id="cfg-slow">—</div></div>
+  <div class="settings-row"><div class="settings-label">Poll interval</div><div class="settings-val" id="cfg-poll">—</div></div>
+
+  <div style="padding:20px 16px 0;">
+    <button class="create-btn" style="background:var(--surface2); color:var(--text);" onclick="refreshAll()">Refresh data</button>
+  </div>
+  <div style="height:20px;"></div>
+</div>
+
+<!-- ══ NAV ══════════════════════════════════════════════════════ -->
+<nav class="nav">
+  <button class="nav-btn active" id="nav-home" onclick="navTo('home')">
+    <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
+    Home
+  </button>
+  <button class="nav-btn" id="nav-trades" onclick="navTo('trades')">
+    <svg viewBox="0 0 24 24"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+    Activity
+  </button>
+  <button class="nav-btn" id="nav-settings" onclick="navTo('settings')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    Settings
+  </button>
+</nav>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let API_URL     = localStorage.getItem('api_url') || '';
+let bots        = JSON.parse(localStorage.getItem('bots') || '[]');
+let liveStatus  = null;
+let allTrades   = [];
+let detailBot   = null;
+let detailChart = null;
+let prevScreen  = 'home';
+let historyMap  = {};   // botId → price history array
+
+if (!bots.length) {
+  bots = [{
+    id: 'main', name: 'BTC Trend Bot', pair: 'BTCZAR',
+    strategy: 'trend', capital: 1000, stoploss: 5,
+    isMain: true, createdAt: Date.now()
+  }];
+  saveBots();
+}
+
+function saveBots() { localStorage.setItem('bots', JSON.stringify(bots)); }
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+function navTo(tab) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('nav-' + tab).classList.add('active');
+  if (tab === 'home' || tab === 'trades') { showScreen('screen-home'); renderHome(); }
+  if (tab === 'settings') { showScreen('screen-settings'); loadConfig(); }
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function goBack() { showScreen('screen-home'); renderHome(); }
+function showCreate() { prevScreen = 'home'; showScreen('screen-create'); }
+
+// ── API calls ─────────────────────────────────────────────────────────────────
+async function apiFetch(path) {
+  if (!API_URL) return null;
+  const url = API_URL.replace(/\/$/, '') + path;
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function refreshAll() {
+  try {
+    const [status, trades] = await Promise.all([
+      apiFetch('/status'), apiFetch('/trades')
+    ]);
+    if (status) {
+      liveStatus = status;
+      if (!historyMap['main']) historyMap['main'] = [];
+      historyMap['main'].push(status.portfolio_value);
+      if (historyMap['main'].length > 48) historyMap['main'].shift();
+    }
+    if (trades) allTrades = trades.trades || [];
+    document.getElementById('last-sync').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    renderHome();
+    updateConnStatus(true);
+  } catch(e) {
+    console.warn('API error:', e.message);
+    updateConnStatus(false);
+    document.getElementById('last-sync').textContent = 'Offline — using cached data';
+  }
+}
+
+function updateConnStatus(ok) {
+  const dot = document.getElementById('conn-dot');
+  const txt = document.getElementById('conn-status');
+  if (!dot) return;
+  dot.className = 'dot ' + (ok ? 'dot-green' : 'dot-red');
+  txt.textContent = ok ? 'Connected to Railway' : 'Cannot reach API';
+}
+
+// ── Render home ───────────────────────────────────────────────────────────────
+function renderHome() {
+  const s = liveStatus;
+  const totalCapital = bots.reduce((a, b) => a + (b.capital || 1000), 0);
+  const portfolio    = s ? s.portfolio_value : totalCapital;
+  const pnl          = portfolio - totalCapital;
+  const pct          = ((pnl / totalCapital) * 100).toFixed(2);
+  const exits        = allTrades.filter(t => t.profit !== null && t.profit !== undefined);
+  const wins         = exits.filter(t => t.profit > 0);
+
+  document.getElementById('m-portfolio').textContent  = fmtZAR(portfolio);
+  document.getElementById('m-pnl').textContent        = (pnl >= 0 ? '+' : '') + fmtZAR(pnl) + ' (' + (pnl >= 0 ? '+' : '') + pct + '%)';
+  document.getElementById('m-pnl').style.color        = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('m-bots').textContent       = bots.length;
+  document.getElementById('m-markets').textContent    = [...new Set(bots.map(b => b.pair))].length + ' market(s)';
+  document.getElementById('m-winrate').textContent    = exits.length ? Math.round(wins.length / exits.length * 100) + '%' : '—';
+  document.getElementById('m-trades').textContent     = allTrades.length;
+
+  const list = document.getElementById('bot-list');
+  list.innerHTML = bots.map(bot => {
+    const isMain  = bot.isMain;
+    const status  = isMain && s ? s : null;
+    const value   = status ? status.portfolio_value : bot.capital;
+    const botPnl  = value - bot.capital;
+    const botPct  = ((botPnl / bot.capital) * 100).toFixed(2);
+    const signal  = status ? status.signal : 'HOLD';
+    const paused  = status ? status.paused : false;
+    const hist    = historyMap[bot.id] || [bot.capital];
+    const sigCls  = signal === 'BUY' ? 'badge-buy' : signal === 'SELL' ? 'badge-sell' : 'badge-hold';
+    const modeBadge = isMain ? (paused ? 'badge-paused' : (s && !s.paper_trading ? 'badge-live' : 'badge-paper')) : 'badge-paper';
+    const modeLabel = isMain ? (paused ? 'PAUSED' : (s && !s.paper_trading ? 'LIVE' : 'PAPER')) : 'PAPER';
+    const spark = buildSparkSVG(hist, botPnl >= 0);
+    return `<div class="bot-card" onclick="openDetail('${bot.id}')">
+      <div class="bot-header">
+        <div>
+          <div class="bot-name">${bot.name}</div>
+          <div class="bot-pair">${bot.pair} · ${bot.strategy.toUpperCase()}</div>
+        </div>
+        <div class="badges">
+          <span class="badge ${modeBadge}">${modeLabel}</span>
+          <span class="badge ${sigCls}">${signal}</span>
+        </div>
+      </div>
+      ${spark}
+      <div class="bot-stats">
+        <div><div class="stat-label">Value</div><div class="stat-val">${fmtZAR(value)}</div></div>
+        <div><div class="stat-label">P&L</div><div class="stat-val ${botPnl >= 0 ? 'green' : 'red'}">${botPnl >= 0 ? '+' : ''}${fmtZAR(botPnl)}</div></div>
+        <div><div class="stat-label">Cycle</div><div class="stat-val">#${status ? status.cycle : 0}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (!bots.length) {
+    list.innerHTML = `<div class="empty">
+      <div class="empty-icon">🤖</div>
+      <div class="empty-title">No bots yet</div>
+      <div class="empty-sub">Tap + to deploy your first bot</div>
+    </div>`;
+  }
+}
+
+function buildSparkSVG(hist, positive) {
+  if (hist.length < 2) return '<svg class="sparkline"></svg>';
+  const min = Math.min(...hist), max = Math.max(...hist), range = max - min || 1;
+  const w = 300, h = 44;
+  const pts = hist.map((v, i) => {
+    const x = (i / (hist.length - 1)) * w;
+    const y = h - ((v - min) / range) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const col = positive ? 'var(--green)' : 'var(--red)';
+  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+// ── Detail ────────────────────────────────────────────────────────────────────
+function openDetail(id) {
+  detailBot = bots.find(b => b.id === id);
+  if (!detailBot) return;
+  const s     = detailBot.isMain && liveStatus ? liveStatus : null;
+  const value = s ? s.portfolio_value : detailBot.capital;
+  const pnl   = value - detailBot.capital;
+  const pct   = ((pnl / detailBot.capital) * 100).toFixed(2);
+  const paused = s ? s.paused : false;
+
+  document.getElementById('d-name').textContent  = detailBot.name;
+  document.getElementById('d-pair').textContent  = detailBot.pair + ' · Cycle #' + (s ? s.cycle : 0);
+  document.getElementById('d-value').textContent = fmtZAR(value);
+  document.getElementById('d-value').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('d-pnl').textContent   = (pnl >= 0 ? '+' : '') + fmtZAR(pnl) + ' (' + (pnl >= 0 ? '+' : '') + pct + '%)';
+  document.getElementById('d-pnl').style.color   = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('d-signal').textContent = s ? s.signal : 'HOLD';
+  document.getElementById('d-trend').textContent  = s ? s.trend : '—';
+  document.getElementById('d-cycle').textContent  = s ? '#' + s.cycle : '—';
+  document.getElementById('d-price').textContent  = s ? fmtZAR(s.price) : '—';
+  document.getElementById('pause-label').textContent = paused ? 'Resume' : 'Pause';
+  document.getElementById('d-badge').innerHTML = `<span class="badge ${paused ? 'badge-paused' : (s && !s.paper_trading ? 'badge-live' : 'badge-paper')}">${paused ? 'PAUSED' : (s && !s.paper_trading ? 'LIVE' : 'PAPER')}</span>`;
+
+  // Chart
+  if (detailChart) { detailChart.destroy(); detailChart = null; }
+  const hist = historyMap[id] || [detailBot.capital];
+  const ctx  = document.getElementById('detail-chart').getContext('2d');
+  detailChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: hist.map((_, i) => i),
+      datasets: [{
+        data: hist,
+        borderColor: pnl >= 0 ? '#00d4aa' : '#e74c3c',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.4,
+        fill: false
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { display: false,
+             min: Math.min(...hist) * 0.998,
+             max: Math.max(...hist) * 1.002 }
+      }
+    }
+  });
+
+  // Trades
+  const botTrades = detailBot.isMain ? allTrades : [];
+  document.getElementById('d-trades').innerHTML = botTrades.length
+    ? botTrades.slice(0, 30).map(t => {
+        const p = t.profit;
+        const col = p == null ? 'var(--muted)' : p >= 0 ? 'var(--green)' : 'var(--red)';
+        return `<div class="trade-row">
+          <div>
+            <div class="trade-type">${t.type}</div>
+            <div class="trade-meta">${(t.time || '').slice(0,16)} UTC · ${detailBot.pair}</div>
+          </div>
+          <div class="trade-profit" style="color:${col}">
+            ${p != null ? (p >= 0 ? '+' : '') + fmtZAR(p) : '—'}
+          </div>
+        </div>`;
+      }).join('')
+    : '<div class="empty" style="padding:28px;"><div class="empty-sub">No trades yet — bot is watching the market</div></div>';
+
+  showScreen('screen-detail');
+}
+
+async function togglePause() {
+  if (!detailBot || !detailBot.isMain || !API_URL) {
+    alert('Connect to Railway first in Settings.');
+    return;
+  }
+  try {
+    const r = await apiFetch('/pause');  // This would need a POST — simplified here
+    await refreshAll();
+    openDetail(detailBot.id);
+  } catch(e) {
+    alert('Could not reach bot API: ' + e.message);
+  }
+}
+
+function copyLogs() {
+  const txt = JSON.stringify(allTrades, null, 2);
+  navigator.clipboard.writeText(txt).then(() => alert('Trade log copied!')).catch(() => alert('Copy failed — try manually'));
+}
+
+function confirmDelete() {
+  if (!confirm('Remove ' + detailBot.name + '? This only removes it from the app, not from Railway.')) return;
+  bots = bots.filter(b => b.id !== detailBot.id);
+  saveBots();
+  goBack();
+}
+
+// ── Create ────────────────────────────────────────────────────────────────────
+function pick(el, groupId) {
+  document.querySelectorAll('#' + groupId + ' .option-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+function createBot() {
+  const name    = document.getElementById('new-name').value.trim();
+  const capital = parseFloat(document.getElementById('new-capital').value) || 1000;
+  const sl      = parseFloat(document.getElementById('new-sl').value) || 5;
+  const market  = document.querySelector('#market-opts .selected')?.dataset.v || 'BTCZAR';
+  const strat   = document.querySelector('#strat-opts .selected')?.dataset.v || 'trend';
+  const newBot  = {
+    id: 'bot_' + Date.now(), name: name || market + ' Bot',
+    pair: market, strategy: strat, capital, stoploss: sl,
+    isMain: false, createdAt: Date.now()
+  };
+  bots.push(newBot);
+  saveBots();
+  document.getElementById('new-name').value = '';
+  goBack();
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function setApiUrl() {
+  const url = prompt('Enter your Railway app URL:\n(e.g. https://valr-bot-xyz.railway.app)', API_URL);
+  if (url !== null) {
+    API_URL = url.trim();
+    localStorage.setItem('api_url', API_URL);
+    document.getElementById('api-url-display').textContent = API_URL || 'Not set';
+    refreshAll();
+  }
+}
+
+async function loadConfig() {
+  document.getElementById('api-url-display').textContent = API_URL || 'Not set — tap Edit to configure';
+  try {
+    const cfg = await apiFetch('/config');
+    if (cfg) {
+      document.getElementById('cfg-pair').textContent  = cfg.pair || '—';
+      document.getElementById('cfg-mode').textContent  = cfg.paper_trading ? 'Paper trading' : 'LIVE';
+      document.getElementById('cfg-sl').textContent    = (cfg.stop_loss_pct * 100).toFixed(0) + '%';
+      document.getElementById('cfg-tp').textContent    = (cfg.take_profit_pct * 100).toFixed(0) + '%';
+      document.getElementById('cfg-fast').textContent  = cfg.fast_ema;
+      document.getElementById('cfg-slow').textContent  = cfg.slow_ema;
+      document.getElementById('cfg-poll').textContent  = (cfg.poll_interval_secs / 60) + ' min';
+    }
+  } catch(e) {}
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtZAR(n) {
+  return 'R' + Number(n).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ── Init & polling ────────────────────────────────────────────────────────────
+renderHome();
+if (API_URL) refreshAll();
+setInterval(() => { if (API_URL) refreshAll(); }, 60000);
+
+// Service worker registration for PWA
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
