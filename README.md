@@ -66,9 +66,18 @@ In Railway → your project → **Variables** tab:
 ```
 VALR_API_KEY     = your_64_char_key_here
 VALR_API_SECRET  = your_64_char_secret_here
+DATABASE_URL     = Railway Postgres URL (recommended)
+LIVE_TRADING_ENABLED = false
 ```
 
 ⚠️ Never put your keys directly in the code files.
+
+`LIVE_TRADING_ENABLED` is an extra safety gate. Bots can be configured for live
+mode, but real orders are blocked unless this is set to `true`.
+
+If `DATABASE_URL` is not set, the app uses a local SQLite file. That is fine for
+local development, but Railway Postgres is recommended for durable bot state,
+trades, backtests, and multi-bot operation.
 
 -----
 
@@ -130,8 +139,51 @@ Only after 30 days of profitable paper trading:
    ```python
    PAPER_TRADING = False
    ```
-1. Commit and push to GitHub — Railway auto-redeploys
-1. The bot will now place real orders with real money
+1. Or switch an individual bot to live mode through the backend/dashboard
+1. Set `LIVE_TRADING_ENABLED=true` in Railway
+1. Commit and push to GitHub - Railway auto-redeploys
+1. The bot can now place real orders with real money
+
+Recommended: keep `LIVE_TRADING_ENABLED=false` until paper trading, backtests,
+and risk settings are reviewed.
+
+-----
+
+## Current App Architecture
+
+The app now runs as one Railway web service:
+
+- `server.py` serves the PWA dashboard and API
+- `bot.py` runs bots in a background runner thread
+- `database.py` stores bot state and trades in SQLite or Postgres
+- `models.py` defines bots and trades
+- `backtesting.py` runs strategy simulations against candle data
+- `exchanges.py` is the exchange adapter layer, with VALR implemented first
+
+The dashboard creates real backend bots now. Extra bots are no longer just saved
+in browser local storage.
+
+-----
+
+## Local Development
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000
+```
+
+Run tests:
+
+```bash
+.venv/bin/python -m unittest discover -s tests
+```
 
 -----
 
@@ -144,7 +196,7 @@ Only after 30 days of profitable paper trading:
 |Lower `STOP_LOSS_PERCENT` (e.g. 0.03)   |Tighter protection, more stop-outs      |
 |Higher `TAKE_PROFIT_PERCENT` (e.g. 0.12)|Holds winners longer, needs bigger moves|
 
-After your first month, share your `trades.json` and we can analyse it together to find the optimal settings.
+After your first month, run `python analyze.py` and review the database-backed trade history to tune settings.
 
 -----
 

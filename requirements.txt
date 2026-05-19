@@ -3,3 +3,5 @@ fastapi==0.111.0
 uvicorn==0.29.0
 aiofiles==23.2.1
 python-multipart==0.0.9
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3

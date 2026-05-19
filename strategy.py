@@ -27,8 +27,10 @@ def _ema(prices: list[float], period: int) -> list[float]:
 
 
 class TrendStrategy:
-    def __init__(self):
+    def __init__(self, fast_period: int = FAST_EMA_PERIOD, slow_period: int = SLOW_EMA_PERIOD):
         self.last_signal = "HOLD"
+        self.fast_period = fast_period
+        self.slow_period = slow_period
 
     def signal(self, closes: list[float]) -> tuple[str, float, float]:
         """
@@ -38,11 +40,11 @@ class TrendStrategy:
             (signal, fast_ema_value, slow_ema_value)
             signal ∈ {"BUY", "SELL", "HOLD"}
         """
-        if len(closes) < SLOW_EMA_PERIOD + 2:
+        if len(closes) < self.slow_period + 2:
             return "HOLD", 0.0, 0.0
 
-        fast = _ema(closes, FAST_EMA_PERIOD)
-        slow = _ema(closes, SLOW_EMA_PERIOD)
+        fast = _ema(closes, self.fast_period)
+        slow = _ema(closes, self.slow_period)
 
         # Align lengths (fast EMA is longer than slow EMA list)
         min_len   = min(len(fast), len(slow))
@@ -66,8 +68,8 @@ class TrendStrategy:
 
     def trend_strength(self, closes: list[float]) -> str:
         """Returns a human-readable trend description."""
-        fast = _ema(closes, FAST_EMA_PERIOD)
-        slow = _ema(closes, SLOW_EMA_PERIOD)
+        fast = _ema(closes, self.fast_period)
+        slow = _ema(closes, self.slow_period)
         if not fast or not slow:
             return "unknown"
         gap_pct = ((fast[-1] - slow[-1]) / slow[-1]) * 100

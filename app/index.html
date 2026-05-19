@@ -250,7 +250,7 @@
       <div><div class="metric-label">Signal</div><div id="d-signal" class="stat-val"></div></div>
       <div><div class="metric-label">Trend</div><div id="d-trend" class="stat-val" style="color:var(--muted); font-size:12px;"></div></div>
       <div><div class="metric-label">Cycle</div><div id="d-cycle" class="stat-val"></div></div>
-      <div><div class="metric-label">BTC/ZAR</div><div id="d-price" class="stat-val"></div></div>
+      <div><div class="metric-label">Market price</div><div id="d-price" class="stat-val"></div></div>
     </div>
   </div>
 
@@ -331,7 +331,7 @@
     </div>
     <button class="create-btn" onclick="createBot()">Deploy Bot</button>
     <p style="font-size:11px; color:var(--muted); text-align:center; margin-top:14px; line-height:1.6;">
-      New bots start in paper trading mode.<br/>Update config.py on Railway to connect to VALR.
+      New bots start in paper trading mode.<br/>Manage live settings from the bot controls.
     </p>
   </div>
 </div>
@@ -395,25 +395,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let API_URL     = localStorage.getItem('api_url') || '';
-let bots        = JSON.parse(localStorage.getItem('bots') || '[]');
+let API_URL     = localStorage.getItem('api_url') || (location.protocol.startsWith('http') ? location.origin : '');
+let bots        = [];
 let liveStatus  = null;
 let allTrades   = [];
 let detailBot   = null;
 let detailChart = null;
 let prevScreen  = 'home';
-let historyMap  = {};   // botId → price history array
+let historyMap  = {};   // botId -> portfolio history array
 
-if (!bots.length) {
-  bots = [{
-    id: 'main', name: 'BTC Trend Bot', pair: 'BTCZAR',
-    strategy: 'trend', capital: 1000, stoploss: 5,
-    isMain: true, createdAt: Date.now()
-  }];
-  saveBots();
-}
-
-function saveBots() { localStorage.setItem('bots', JSON.stringify(bots)); }
+function saveBots() {}
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
 function navTo(tab) {
@@ -432,24 +423,27 @@ function goBack() { showScreen('screen-home'); renderHome(); }
 function showCreate() { prevScreen = 'home'; showScreen('screen-create'); }
 
 // ── API calls ─────────────────────────────────────────────────────────────────
-async function apiFetch(path) {
+async function apiFetch(path, options = {}) {
   if (!API_URL) return null;
   const url = API_URL.replace(/\/$/, '') + path;
-  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000), ...options });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 
 async function refreshAll() {
   try {
-    const [status, trades] = await Promise.all([
-      apiFetch('/status'), apiFetch('/trades')
+    const [botData, trades] = await Promise.all([
+      apiFetch('/bots'), apiFetch('/trades')
     ]);
-    if (status) {
-      liveStatus = status;
-      if (!historyMap['main']) historyMap['main'] = [];
-      historyMap['main'].push(status.portfolio_value);
-      if (historyMap['main'].length > 48) historyMap['main'].shift();
+    if (botData) {
+      bots = botData.bots || [];
+      liveStatus = bots.find(b => b.id === 'main') || bots[0] || null;
+      bots.forEach(bot => {
+        if (!historyMap[bot.id]) historyMap[bot.id] = [];
+        historyMap[bot.id].push(bot.portfolio_value || bot.capital || 0);
+        if (historyMap[bot.id].length > 48) historyMap[bot.id].shift();
+      });
     }
     if (trades) allTrades = trades.trades || [];
     document.getElementById('last-sync').textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -472,11 +466,10 @@ function updateConnStatus(ok) {
 
 // ── Render home ───────────────────────────────────────────────────────────────
 function renderHome() {
-  const s = liveStatus;
-  const totalCapital = bots.reduce((a, b) => a + (b.capital || 1000), 0);
-  const portfolio    = s ? s.portfolio_value : totalCapital;
+  const totalCapital = bots.reduce((a, b) => a + (b.starting_capital || b.capital || 0), 0);
+  const portfolio    = bots.reduce((a, b) => a + (b.portfolio_value || b.starting_capital || b.capital || 0), 0);
   const pnl          = portfolio - totalCapital;
-  const pct          = ((pnl / totalCapital) * 100).toFixed(2);
+  const pct          = totalCapital ? ((pnl / totalCapital) * 100).toFixed(2) : '0.00';
   const exits        = allTrades.filter(t => t.profit !== null && t.profit !== undefined);
   const wins         = exits.filter(t => t.profit > 0);
 
@@ -490,34 +483,32 @@ function renderHome() {
 
   const list = document.getElementById('bot-list');
   list.innerHTML = bots.map(bot => {
-    const isMain  = bot.isMain;
-    const status  = isMain && s ? s : null;
-    const value   = status ? status.portfolio_value : bot.capital;
-    const botPnl  = value - bot.capital;
-    const botPct  = ((botPnl / bot.capital) * 100).toFixed(2);
-    const signal  = status ? status.signal : 'HOLD';
-    const paused  = status ? status.paused : false;
-    const hist    = historyMap[bot.id] || [bot.capital];
+    const capital = bot.starting_capital || bot.capital || 0;
+    const value   = bot.portfolio_value ?? capital;
+    const botPnl  = bot.pnl ?? (value - capital);
+    const signal  = bot.signal || 'HOLD';
+    const paused  = bot.paused || bot.status === 'paused';
+    const hist    = historyMap[bot.id] || [capital];
     const sigCls  = signal === 'BUY' ? 'badge-buy' : signal === 'SELL' ? 'badge-sell' : 'badge-hold';
-    const modeBadge = isMain ? (paused ? 'badge-paused' : (s && !s.paper_trading ? 'badge-live' : 'badge-paper')) : 'badge-paper';
-    const modeLabel = isMain ? (paused ? 'PAUSED' : (s && !s.paper_trading ? 'LIVE' : 'PAPER')) : 'PAPER';
+    const modeBadge = paused ? 'badge-paused' : (bot.mode === 'live' ? 'badge-live' : 'badge-paper');
+    const modeLabel = paused ? 'PAUSED' : (bot.mode === 'live' ? 'LIVE' : 'PAPER');
     const spark = buildSparkSVG(hist, botPnl >= 0);
     return `<div class="bot-card" onclick="openDetail('${bot.id}')">
       <div class="bot-header">
         <div>
-          <div class="bot-name">${bot.name}</div>
-          <div class="bot-pair">${bot.pair} · ${bot.strategy.toUpperCase()}</div>
+          <div class="bot-name">${esc(bot.name)}</div>
+          <div class="bot-pair">${esc(bot.pair)} · ${esc((bot.strategy || 'trend').toUpperCase())}</div>
         </div>
         <div class="badges">
           <span class="badge ${modeBadge}">${modeLabel}</span>
-          <span class="badge ${sigCls}">${signal}</span>
+          <span class="badge ${sigCls}">${esc(signal)}</span>
         </div>
       </div>
       ${spark}
       <div class="bot-stats">
         <div><div class="stat-label">Value</div><div class="stat-val">${fmtZAR(value)}</div></div>
         <div><div class="stat-label">P&L</div><div class="stat-val ${botPnl >= 0 ? 'green' : 'red'}">${botPnl >= 0 ? '+' : ''}${fmtZAR(botPnl)}</div></div>
-        <div><div class="stat-label">Cycle</div><div class="stat-val">#${status ? status.cycle : 0}</div></div>
+        <div><div class="stat-label">Cycle</div><div class="stat-val">#${bot.cycle || 0}</div></div>
       </div>
     </div>`;
   }).join('');
@@ -550,28 +541,29 @@ function buildSparkSVG(hist, positive) {
 function openDetail(id) {
   detailBot = bots.find(b => b.id === id);
   if (!detailBot) return;
-  const s     = detailBot.isMain && liveStatus ? liveStatus : null;
-  const value = s ? s.portfolio_value : detailBot.capital;
-  const pnl   = value - detailBot.capital;
-  const pct   = ((pnl / detailBot.capital) * 100).toFixed(2);
-  const paused = s ? s.paused : false;
+  const s     = detailBot;
+  const capital = detailBot.starting_capital || detailBot.capital || 0;
+  const value = s.portfolio_value ?? capital;
+  const pnl   = s.pnl ?? (value - capital);
+  const pct   = capital ? ((pnl / capital) * 100).toFixed(2) : '0.00';
+  const paused = s.paused || s.status === 'paused';
 
   document.getElementById('d-name').textContent  = detailBot.name;
-  document.getElementById('d-pair').textContent  = detailBot.pair + ' · Cycle #' + (s ? s.cycle : 0);
+  document.getElementById('d-pair').textContent  = detailBot.pair + ' · Cycle #' + (s.cycle || 0);
   document.getElementById('d-value').textContent = fmtZAR(value);
   document.getElementById('d-value').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
   document.getElementById('d-pnl').textContent   = (pnl >= 0 ? '+' : '') + fmtZAR(pnl) + ' (' + (pnl >= 0 ? '+' : '') + pct + '%)';
   document.getElementById('d-pnl').style.color   = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-  document.getElementById('d-signal').textContent = s ? s.signal : 'HOLD';
-  document.getElementById('d-trend').textContent  = s ? s.trend : '—';
-  document.getElementById('d-cycle').textContent  = s ? '#' + s.cycle : '—';
-  document.getElementById('d-price').textContent  = s ? fmtZAR(s.price) : '—';
+  document.getElementById('d-signal').textContent = s.signal || 'HOLD';
+  document.getElementById('d-trend').textContent  = s.trend || '-';
+  document.getElementById('d-cycle').textContent  = '#' + (s.cycle || 0);
+  document.getElementById('d-price').textContent  = s.price ? fmtZAR(s.price) : '-';
   document.getElementById('pause-label').textContent = paused ? 'Resume' : 'Pause';
-  document.getElementById('d-badge').innerHTML = `<span class="badge ${paused ? 'badge-paused' : (s && !s.paper_trading ? 'badge-live' : 'badge-paper')}">${paused ? 'PAUSED' : (s && !s.paper_trading ? 'LIVE' : 'PAPER')}</span>`;
+  document.getElementById('d-badge').innerHTML = `<span class="badge ${paused ? 'badge-paused' : (s.mode === 'live' ? 'badge-live' : 'badge-paper')}">${paused ? 'PAUSED' : (s.mode === 'live' ? 'LIVE' : 'PAPER')}</span>`;
 
   // Chart
   if (detailChart) { detailChart.destroy(); detailChart = null; }
-  const hist = historyMap[id] || [detailBot.capital];
+  const hist = historyMap[id] || [capital];
   const ctx  = document.getElementById('detail-chart').getContext('2d');
   detailChart = new Chart(ctx, {
     type: 'line',
@@ -599,15 +591,15 @@ function openDetail(id) {
   });
 
   // Trades
-  const botTrades = detailBot.isMain ? allTrades : [];
+  const botTrades = allTrades.filter(t => t.bot_id === detailBot.id);
   document.getElementById('d-trades').innerHTML = botTrades.length
     ? botTrades.slice(0, 30).map(t => {
         const p = t.profit;
         const col = p == null ? 'var(--muted)' : p >= 0 ? 'var(--green)' : 'var(--red)';
         return `<div class="trade-row">
           <div>
-            <div class="trade-type">${t.type}</div>
-            <div class="trade-meta">${(t.time || '').slice(0,16)} UTC · ${detailBot.pair}</div>
+            <div class="trade-type">${esc(t.type)}</div>
+            <div class="trade-meta">${esc((t.time || '').slice(0,16))} UTC · ${esc(t.pair || detailBot.pair)}</div>
           </div>
           <div class="trade-profit" style="color:${col}">
             ${p != null ? (p >= 0 ? '+' : '') + fmtZAR(p) : '—'}
@@ -620,12 +612,12 @@ function openDetail(id) {
 }
 
 async function togglePause() {
-  if (!detailBot || !detailBot.isMain || !API_URL) {
+  if (!detailBot || !API_URL) {
     alert('Connect to Railway first in Settings.');
     return;
   }
   try {
-    const r = await apiFetch('/pause');  // This would need a POST — simplified here
+    await apiFetch('/bots/' + encodeURIComponent(detailBot.id) + '/pause', { method: 'POST' });
     await refreshAll();
     openDetail(detailBot.id);
   } catch(e) {
@@ -639,10 +631,11 @@ function copyLogs() {
 }
 
 function confirmDelete() {
-  if (!confirm('Remove ' + detailBot.name + '? This only removes it from the app, not from Railway.')) return;
-  bots = bots.filter(b => b.id !== detailBot.id);
-  saveBots();
-  goBack();
+  if (!confirm('Stop and remove ' + detailBot.name + ' from the active dashboard?')) return;
+  apiFetch('/bots/' + encodeURIComponent(detailBot.id), { method: 'DELETE' })
+    .then(() => refreshAll())
+    .then(() => goBack())
+    .catch(e => alert('Could not remove bot: ' + e.message));
 }
 
 // ── Create ────────────────────────────────────────────────────────────────────
@@ -651,21 +644,31 @@ function pick(el, groupId) {
   el.classList.add('selected');
 }
 
-function createBot() {
+async function createBot() {
   const name    = document.getElementById('new-name').value.trim();
   const capital = parseFloat(document.getElementById('new-capital').value) || 1000;
   const sl      = parseFloat(document.getElementById('new-sl').value) || 5;
   const market  = document.querySelector('#market-opts .selected')?.dataset.v || 'BTCZAR';
   const strat   = document.querySelector('#strat-opts .selected')?.dataset.v || 'trend';
-  const newBot  = {
-    id: 'bot_' + Date.now(), name: name || market + ' Bot',
-    pair: market, strategy: strat, capital, stoploss: sl,
-    isMain: false, createdAt: Date.now()
-  };
-  bots.push(newBot);
-  saveBots();
-  document.getElementById('new-name').value = '';
-  goBack();
+  try {
+    await apiFetch('/bots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name || market + ' Bot',
+        pair: market,
+        strategy: strat,
+        mode: 'paper',
+        starting_capital: capital,
+        stop_loss_pct: sl / 100
+      })
+    });
+    document.getElementById('new-name').value = '';
+    await refreshAll();
+    goBack();
+  } catch(e) {
+    alert('Could not create bot: ' + e.message);
+  }
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -698,6 +701,12 @@ async function loadConfig() {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtZAR(n) {
   return 'R' + Number(n).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[c]);
 }
 
 // ── Init & polling ────────────────────────────────────────────────────────────

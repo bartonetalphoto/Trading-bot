@@ -1,28 +1,28 @@
-"""
-BotTrader — Combined Server
-=============================
-Single entry point that does everything:
-  - Serves the PWA app (index.html, manifest, sw.js, icons)
-  - Exposes the /status, /trades, /config, /pause API endpoints
-  - Runs the trading bot in a background thread
-
-Railway only needs to run: python server.py
-"""
-
-import json
-import threading
 import logging
-import time
-from pathlib import Path
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+from backtesting import BacktestConfig, run_backtest
+from bot_service import (
+    bot_to_dict,
+    create_bot,
+    ensure_default_bot,
+    status_with_stats,
+    trade_to_dict,
+    update_bot,
+)
+from config import VALR_API_KEY, VALR_API_SECRET
+from database import init_db, session_scope, utc_now
+from exchanges import get_exchange_client
+from models import Bot, Trade
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -34,14 +34,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("server")
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-BASE_DIR       = Path(__file__).parent
-APP_DIR        = BASE_DIR / "app"
-TRADE_LOG_FILE = BASE_DIR / "trades.json"
-STATUS_FILE    = BASE_DIR / "bot_status.json"
-PAUSE_FILE     = BASE_DIR / "bot_paused.flag"
+BASE_DIR = Path(__file__).parent
+APP_DIR = BASE_DIR / "app"
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="BotTrader")
 
 app.add_middleware(
@@ -51,64 +46,146 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── API routes (must be defined BEFORE static mount) ─────────────────────────
+
+@app.on_event("startup")
+def startup():
+    init_db()
+    with session_scope() as session:
+        ensure_default_bot(session)
+
+
+@app.get("/bots")
+def list_bots(include_stopped: bool = Query(False)):
+    with session_scope() as session:
+        query = session.query(Bot)
+        if not include_stopped:
+            query = query.filter(Bot.status != "stopped")
+        bots = query.order_by(Bot.created_at.asc()).all()
+        return JSONResponse({"bots": [status_with_stats(session, bot) for bot in bots], "count": len(bots)})
+
+
+@app.post("/bots")
+def create_bot_endpoint(payload: dict = Body(...)):
+    with session_scope() as session:
+        bot = create_bot(session, payload)
+        return JSONResponse(status_with_stats(session, bot), status_code=201)
+
+
+@app.get("/bots/{bot_id}")
+def get_bot(bot_id: str):
+    with session_scope() as session:
+        bot = _get_bot_or_404(session, bot_id)
+        return JSONResponse(status_with_stats(session, bot))
+
+
+@app.patch("/bots/{bot_id}")
+def patch_bot(bot_id: str, payload: dict = Body(...)):
+    with session_scope() as session:
+        bot = _get_bot_or_404(session, bot_id)
+        update_bot(session, bot, payload)
+        return JSONResponse(status_with_stats(session, bot))
+
+
+@app.delete("/bots/{bot_id}")
+def delete_bot(bot_id: str):
+    with session_scope() as session:
+        bot = _get_bot_or_404(session, bot_id)
+        bot.status = "stopped"
+        bot.updated_at = utc_now()
+        return JSONResponse({"deleted": True, "bot": bot_to_dict(bot)})
+
+
+@app.post("/bots/{bot_id}/pause")
+def pause_bot(bot_id: str):
+    with session_scope() as session:
+        bot = _get_bot_or_404(session, bot_id)
+        bot.status = "running" if bot.status == "paused" else "paused"
+        bot.updated_at = utc_now()
+        return JSONResponse({"paused": bot.status == "paused", "bot": bot_to_dict(bot)})
+
+
+@app.post("/bots/{bot_id}/start")
+def start_bot(bot_id: str):
+    with session_scope() as session:
+        bot = _get_bot_or_404(session, bot_id)
+        bot.status = "running"
+        bot.updated_at = utc_now()
+        return JSONResponse({"started": True, "bot": bot_to_dict(bot)})
+
+
+@app.post("/bots/{bot_id}/stop")
+def stop_bot(bot_id: str):
+    with session_scope() as session:
+        bot = _get_bot_or_404(session, bot_id)
+        bot.status = "stopped"
+        bot.updated_at = utc_now()
+        return JSONResponse({"stopped": True, "bot": bot_to_dict(bot)})
+
 
 @app.get("/status")
 def get_status():
-    status = _read_json(STATUS_FILE, {
-        "pair": "BTCZAR", "cycle": 0, "price": 0,
-        "signal": "STARTING", "trend": "Bot starting up...",
-        "fast_ema": 0, "slow_ema": 0,
-        "portfolio_value": 1000.0, "pnl": 0.0, "pnl_pct": 0.0,
-        "paper_trading": True, "status": "starting",
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-    })
-    trades = _read_json(TRADE_LOG_FILE, [])
-    wins   = [t for t in trades if t.get("profit", 0) and t["profit"] > 0]
-    exits  = [t for t in trades if t.get("profit") is not None]
-    status["total_trades"] = len(trades)
-    status["win_rate"]     = round(len(wins) / len(exits) * 100, 1) if exits else 0
-    status["paused"]       = PAUSE_FILE.exists()
-    return JSONResponse(status)
+    with session_scope() as session:
+        bot = ensure_default_bot(session)
+        return JSONResponse(status_with_stats(session, bot))
 
 
 @app.get("/trades")
-def get_trades():
-    trades = _read_json(TRADE_LOG_FILE, [])
-    return JSONResponse({"trades": list(reversed(trades)), "count": len(trades)})
+def get_trades(bot_id: str | None = None):
+    with session_scope() as session:
+        query = session.query(Trade)
+        if bot_id:
+            query = query.filter(Trade.bot_id == bot_id)
+        trades = query.order_by(Trade.created_at.desc()).limit(500).all()
+        return JSONResponse({"trades": [trade_to_dict(trade) for trade in trades], "count": len(trades)})
+
+
+@app.post("/backtest")
+def backtest(payload: dict = Body(...)):
+    pair = str(payload.get("pair") or "BTCZAR").upper().replace("/", "")
+    interval = int(payload.get("candle_interval") or 3600)
+    limit = int(payload.get("candle_limit") or 300)
+    client = get_exchange_client(str(payload.get("exchange") or "valr"), VALR_API_KEY, VALR_API_SECRET)
+    candles = client.get_candles(pair, interval=interval, limit=limit)
+    result = run_backtest(
+        candles,
+        BacktestConfig(
+            starting_capital=float(payload.get("starting_capital") or payload.get("capital") or 1000.0),
+            trade_amount_pct=float(payload.get("trade_amount_pct") or 0.95),
+            stop_loss_pct=float(payload.get("stop_loss_pct") or 0.05),
+            take_profit_pct=float(payload.get("take_profit_pct") or 0.08),
+            fast_ema_period=int(payload.get("fast_ema_period") or 9),
+            slow_ema_period=int(payload.get("slow_ema_period") or 21),
+        ),
+    )
+    result["pair"] = pair
+    result["candle_count"] = len(candles)
+    return JSONResponse(result)
 
 
 @app.get("/config")
 def get_config():
-    try:
-        from config import (
-            PAIR, PAPER_TRADING, STARTING_CAPITAL_ZAR,
-            TRADE_AMOUNT_PERCENT, STOP_LOSS_PERCENT,
-            TAKE_PROFIT_PERCENT, FAST_EMA_PERIOD,
-            SLOW_EMA_PERIOD, POLL_INTERVAL_SECONDS,
-        )
+    with session_scope() as session:
+        bot = ensure_default_bot(session)
         return JSONResponse({
-            "pair":               PAIR,
-            "paper_trading":      PAPER_TRADING,
-            "starting_capital":   STARTING_CAPITAL_ZAR,
-            "trade_amount_pct":   TRADE_AMOUNT_PERCENT,
-            "stop_loss_pct":      STOP_LOSS_PERCENT,
-            "take_profit_pct":    TAKE_PROFIT_PERCENT,
-            "fast_ema":           FAST_EMA_PERIOD,
-            "slow_ema":           SLOW_EMA_PERIOD,
-            "poll_interval_secs": POLL_INTERVAL_SECONDS,
+            "pair": bot.pair,
+            "paper_trading": bot.mode == "paper",
+            "starting_capital": bot.starting_capital,
+            "trade_amount_pct": bot.trade_amount_pct,
+            "stop_loss_pct": bot.stop_loss_pct,
+            "take_profit_pct": bot.take_profit_pct,
+            "fast_ema": bot.fast_ema_period,
+            "slow_ema": bot.slow_ema_period,
+            "poll_interval_secs": bot.poll_interval_seconds,
         })
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/pause")
 def toggle_pause():
-    if PAUSE_FILE.exists():
-        PAUSE_FILE.unlink()
-        return JSONResponse({"paused": False, "message": "Bot resumed"})
-    PAUSE_FILE.touch()
-    return JSONResponse({"paused": True, "message": "Bot paused"})
+    with session_scope() as session:
+        bot = ensure_default_bot(session)
+        bot.status = "running" if bot.status == "paused" else "paused"
+        bot.updated_at = utc_now()
+        return JSONResponse({"paused": bot.status == "paused", "message": "Bot paused" if bot.status == "paused" else "Bot resumed"})
 
 
 @app.get("/health")
@@ -116,64 +193,61 @@ def health():
     return {"ok": True, "time": datetime.now(timezone.utc).isoformat()}
 
 
-# ── PWA static files ──────────────────────────────────────────────────────────
-
 @app.get("/manifest.json")
 def manifest():
     return FileResponse(str(APP_DIR / "manifest.json"), media_type="application/json")
+
 
 @app.get("/sw.js")
 def sw():
     return FileResponse(str(APP_DIR / "sw.js"), media_type="application/javascript")
 
+
 @app.get("/icon-192.png")
 def icon192():
     return FileResponse(str(APP_DIR / "icon-192.png"), media_type="image/png")
 
+
 @app.get("/icon-512.png")
 def icon512():
     return FileResponse(str(APP_DIR / "icon-512.png"), media_type="image/png")
+
 
 @app.get("/")
 def index():
     return FileResponse(str(APP_DIR / "index.html"), media_type="text/html")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+@app.get("/index.html")
+def index_html():
+    return FileResponse(str(APP_DIR / "index.html"), media_type="text/html")
 
-def _read_json(path: Path, default):
-    try:
-        if path.exists():
-            return json.loads(path.read_text())
-    except Exception:
-        pass
-    return default
-
-
-# ── Bot thread ────────────────────────────────────────────────────────────────
 
 def run_bot():
-    """Run the trading bot in a background thread."""
-    log.info("Bot thread starting...")
+    log.info("Bot runner thread starting...")
     try:
         import bot
+
         bot.main()
-    except Exception as e:
-        log.error(f"Bot thread crashed: {e}", exc_info=True)
+    except Exception as exc:
+        log.error("Bot runner crashed: %s", exc, exc_info=True)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def _get_bot_or_404(session, bot_id: str) -> Bot:
+    bot = session.get(Bot, bot_id)
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+    return bot
+
 
 if __name__ == "__main__":
-    import os
+    import threading
 
     port = int(os.environ.get("PORT", 3000))
-    log.info(f"Starting BotTrader server on port {port}")
+    log.info("Starting BotTrader server on port %s", port)
 
-    # Start bot in background thread
     bot_thread = threading.Thread(target=run_bot, daemon=True)
     bot_thread.start()
-    log.info("Bot thread started")
+    log.info("Bot runner thread started")
 
-    # Start web server (blocks here)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")

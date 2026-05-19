@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Local runtime state
+bot.log
+bottrader.db
+bot_status.json
+bot_paused.flag
+trades.json
