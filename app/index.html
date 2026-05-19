@@ -325,16 +325,22 @@
       <label class="form-label">Strategy</label>
       <div class="option-grid" id="strat-opts">
         <button class="option-btn selected" data-v="trend" onclick="pick(this,'strat-opts')">
-          <div class="option-btn-title">Trend follow</div><div class="option-btn-sub">EMA 9/21 — medium</div>
+          <div class="option-btn-title">Trend follow</div><div class="option-btn-sub">EMA/MACD volume</div>
+        </button>
+        <button class="option-btn" data-v="conservative" onclick="pick(this,'strat-opts')">
+          <div class="option-btn-title">Conservative</div><div class="option-btn-sub">Stronger confirms</div>
         </button>
         <button class="option-btn" data-v="grid" onclick="pick(this,'strat-opts')">
-          <div class="option-btn-title">Grid trading</div><div class="option-btn-sub">Range — low risk</div>
+          <div class="option-btn-title">Grid trading</div><div class="option-btn-sub">Range bounds</div>
+        </button>
+        <button class="option-btn" data-v="breakout" onclick="pick(this,'strat-opts')">
+          <div class="option-btn-title">Breakout</div><div class="option-btn-sub">Vol + volume</div>
         </button>
         <button class="option-btn" data-v="scalp" onclick="pick(this,'strat-opts')">
-          <div class="option-btn-title">Scalping</div><div class="option-btn-sub">Fast — high risk</div>
+          <div class="option-btn-title">Scalping</div><div class="option-btn-sub">Fast momentum</div>
         </button>
         <button class="option-btn" data-v="dca" onclick="pick(this,'strat-opts')">
-          <div class="option-btn-title">DCA</div><div class="option-btn-sub">Buy the dip</div>
+          <div class="option-btn-title">DCA</div><div class="option-btn-sub">Schedule + dips</div>
         </button>
       </div>
     </div>
@@ -384,16 +390,22 @@
       <label class="form-label">Strategy</label>
       <div class="option-grid" id="bt-strat-opts">
         <button class="option-btn selected" data-v="trend" onclick="pick(this,'bt-strat-opts')">
-          <div class="option-btn-title">Trend follow</div><div class="option-btn-sub">EMA 9/21</div>
+          <div class="option-btn-title">Trend follow</div><div class="option-btn-sub">EMA/MACD volume</div>
+        </button>
+        <button class="option-btn" data-v="conservative" onclick="pick(this,'bt-strat-opts')">
+          <div class="option-btn-title">Conservative</div><div class="option-btn-sub">Fewer trades</div>
         </button>
         <button class="option-btn" data-v="scalp" onclick="pick(this,'bt-strat-opts')">
-          <div class="option-btn-title">Scalping</div><div class="option-btn-sub">EMA 5/13</div>
+          <div class="option-btn-title">Scalping</div><div class="option-btn-sub">Fast momentum</div>
         </button>
         <button class="option-btn" data-v="grid" onclick="pick(this,'bt-strat-opts')">
           <div class="option-btn-title">Grid range</div><div class="option-btn-sub">Range bands</div>
         </button>
+        <button class="option-btn" data-v="breakout" onclick="pick(this,'bt-strat-opts')">
+          <div class="option-btn-title">Breakout</div><div class="option-btn-sub">Vol + volume</div>
+        </button>
         <button class="option-btn" data-v="dca" onclick="pick(this,'bt-strat-opts')">
-          <div class="option-btn-title">DCA dip</div><div class="option-btn-sub">Dip entries</div>
+          <div class="option-btn-title">DCA dip</div><div class="option-btn-sub">Schedule + dips</div>
         </button>
       </div>
     </div>
@@ -409,6 +421,10 @@
       <div class="form-group">
         <label class="form-label">Trade size %</label>
         <input class="form-input" id="bt-trade" type="number" value="95" min="5" max="100"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Position cap %</label>
+        <input class="form-input" id="bt-maxpos" type="number" value="95" min="5" max="100"/>
       </div>
       <div class="form-group">
         <label class="form-label">Stop-loss %</label>
@@ -783,6 +799,7 @@ function backtestPayload() {
     candle_limit: parseInt(document.getElementById('bt-candles').value, 10) || 300,
     candle_interval: (parseInt(document.getElementById('bt-hours').value, 10) || 1) * 3600,
     trade_amount_pct: (parseFloat(document.getElementById('bt-trade').value) || 95) / 100,
+    max_position_pct: (parseFloat(document.getElementById('bt-maxpos').value) || 95) / 100,
     stop_loss_pct: (parseFloat(document.getElementById('bt-sl').value) || 5) / 100,
     take_profit_pct: (parseFloat(document.getElementById('bt-tp').value) || 8) / 100
   };
@@ -923,6 +940,7 @@ async function deployBacktestBot() {
         mode: 'paper',
         starting_capital: payload.starting_capital,
         trade_amount_pct: backtestResult.trade_amount_pct || payload.trade_amount_pct,
+        max_position_pct: backtestResult.max_position_pct || payload.max_position_pct,
         stop_loss_pct: backtestResult.stop_loss_pct || payload.stop_loss_pct,
         take_profit_pct: backtestResult.take_profit_pct || payload.take_profit_pct,
         fast_ema_period: backtestResult.fast_ema_period,

@@ -8,7 +8,7 @@ from config import VALR_API_KEY, VALR_API_SECRET
 from database import init_db, session_scope, utc_now
 from exchanges import ExchangeClient, get_exchange_client
 from models import Bot
-from strategy import TrendStrategy
+from strategy import build_strategy
 
 
 logging.basicConfig(
@@ -77,7 +77,9 @@ def run_bot_cycle(session, bot: Bot) -> None:
 
         client = get_exchange_client(bot.exchange, VALR_API_KEY, VALR_API_SECRET)
         candles = client.get_candles(bot.pair, interval=bot.candle_interval, limit=bot.candle_limit)
-        if len(candles) < bot.slow_ema_period + 2:
+        strategy = build_strategy(bot.strategy, bot.fast_ema_period, bot.slow_ema_period)
+        min_candles = max(bot.slow_ema_period + 2, getattr(strategy, "min_candles", 0))
+        if len(candles) < min_candles:
             bot.signal = "WAIT"
             bot.trend = f"Only {len(candles)} candles available"
             bot.updated_at = utc_now()
@@ -86,20 +88,34 @@ def run_bot_cycle(session, bot: Bot) -> None:
 
         closes = [c["close"] for c in candles]
         current_price = closes[-1]
-        strategy = TrendStrategy(bot.fast_ema_period, bot.slow_ema_period)
-        signal, fast_ema, slow_ema = strategy.signal(closes)
-        trend = strategy.trend_strength(closes)
+        decision = strategy.evaluate(candles)
+        signal = decision.signal
 
         bot.last_price = current_price
-        bot.fast_ema = fast_ema
-        bot.slow_ema = slow_ema
+        bot.fast_ema = decision.fast_ema
+        bot.slow_ema = decision.slow_ema
         bot.signal = signal
-        bot.trend = trend
+        bot.trend = f"{decision.trend} | {decision.reason}"[:255]
 
         if bot.mode == "paper":
-            _paper_trade(session, bot, signal, current_price)
+            _paper_trade(
+                session,
+                bot,
+                signal,
+                current_price,
+                allow_scale_in=getattr(strategy, "allows_scale_in", False),
+                signal_reason=decision.reason,
+            )
         else:
-            _live_trade(session, bot, client, signal, current_price)
+            _live_trade(
+                session,
+                bot,
+                client,
+                signal,
+                current_price,
+                allow_scale_in=getattr(strategy, "allows_scale_in", False),
+                signal_reason=decision.reason,
+            )
 
         _update_portfolio(bot, current_price)
         bot.updated_at = utc_now()
@@ -113,39 +129,62 @@ def run_bot_cycle(session, bot: Bot) -> None:
         log.error("  [%s] cycle error: %s", bot.name, exc, exc_info=True)
 
 
-def _paper_trade(session, bot: Bot, signal: str, price: float) -> None:
+def _paper_trade(
+    session,
+    bot: Bot,
+    signal: str,
+    price: float,
+    *,
+    allow_scale_in: bool = False,
+    signal_reason: str | None = None,
+) -> None:
     exit_reason = _exit_reason(bot, price)
     if exit_reason:
         _paper_exit(session, bot, price, exit_reason)
         return
 
-    if signal == "BUY" and bot.position is None and bot.quote_balance >= bot.min_quote_to_trade:
-        available = bot.quote_balance * bot.trade_amount_pct
-        max_position = bot.starting_capital * bot.max_position_pct
-        quote_amount = min(available, max_position)
-        if quote_amount < bot.min_quote_to_trade:
-            bot.signal = "HOLD"
-            bot.trend = "Trade amount below minimum"
-            return
-        base_amount = quote_amount / price
-        bot.quote_balance -= quote_amount
-        bot.base_balance += base_amount
-        bot.position = "long"
-        bot.entry_price = price
-        record_trade(
-            session,
-            bot,
-            trade_type="BUY",
-            side="BUY",
-            reason="SIGNAL",
-            price=price,
-            base_amount=base_amount,
-            quote_amount=quote_amount,
-        )
+    can_enter = bot.position is None
+    can_add = allow_scale_in and bot.position == "long"
+    if signal == "BUY" and (can_enter or can_add) and bot.quote_balance >= bot.min_quote_to_trade:
+        _paper_enter_or_add(session, bot, price, signal_reason=signal_reason)
         return
 
     if signal == "SELL" and bot.position == "long":
         _paper_exit(session, bot, price, "SELL")
+
+
+def _paper_enter_or_add(session, bot: Bot, price: float, signal_reason: str | None = None) -> None:
+    current_exposure = bot.base_balance * price
+    max_position = bot.starting_capital * bot.max_position_pct
+    remaining_position = max(0.0, max_position - current_exposure)
+    available = bot.quote_balance * bot.trade_amount_pct
+    quote_amount = min(available, remaining_position)
+    if quote_amount < bot.min_quote_to_trade:
+        bot.signal = "HOLD"
+        bot.trend = "Trade amount below minimum or position cap reached"
+        return
+
+    is_scale_in = bot.position == "long" and bot.base_balance > 0
+    base_amount = quote_amount / price
+    previous_cost = bot.base_balance * (bot.entry_price or price)
+    new_base_balance = bot.base_balance + base_amount
+
+    bot.quote_balance -= quote_amount
+    bot.base_balance = new_base_balance
+    bot.position = "long"
+    bot.entry_price = (previous_cost + quote_amount) / new_base_balance if new_base_balance else price
+    bot.signal = "DCA-BUY" if is_scale_in else "BUY"
+
+    record_trade(
+        session,
+        bot,
+        trade_type="DCA-BUY" if is_scale_in else "BUY",
+        side="BUY",
+        reason=signal_reason or "SIGNAL",
+        price=price,
+        base_amount=base_amount,
+        quote_amount=quote_amount,
+    )
 
 
 def _paper_exit(session, bot: Bot, price: float, reason: str) -> None:
@@ -175,7 +214,16 @@ def _paper_exit(session, bot: Bot, price: float, reason: str) -> None:
     )
 
 
-def _live_trade(session, bot: Bot, client: ExchangeClient, signal: str, price: float) -> None:
+def _live_trade(
+    session,
+    bot: Bot,
+    client: ExchangeClient,
+    signal: str,
+    price: float,
+    *,
+    allow_scale_in: bool = False,
+    signal_reason: str | None = None,
+) -> None:
     if not LIVE_TRADING_ENABLED:
         bot.signal = "LIVE_DISABLED"
         bot.trend = "Set LIVE_TRADING_ENABLED=true before real orders are allowed"
@@ -206,22 +254,37 @@ def _live_trade(session, bot: Bot, client: ExchangeClient, signal: str, price: f
         bot.signal = exit_reason
         return
 
-    if signal == "BUY" and bot.position is None and bot.quote_balance >= bot.min_quote_to_trade:
-        quote_amount = min(bot.quote_balance * bot.trade_amount_pct, bot.starting_capital * bot.max_position_pct)
+    can_enter = bot.position is None
+    can_add = allow_scale_in and bot.position == "long"
+    if signal == "BUY" and (can_enter or can_add) and bot.quote_balance >= bot.min_quote_to_trade:
+        current_exposure = bot.base_balance * price
+        max_position = bot.starting_capital * bot.max_position_pct
+        remaining_position = max(0.0, max_position - current_exposure)
+        quote_amount = min(bot.quote_balance * bot.trade_amount_pct, remaining_position)
+        if quote_amount < bot.min_quote_to_trade:
+            bot.signal = "HOLD"
+            bot.trend = "Trade amount below minimum or position cap reached"
+            return
+        is_scale_in = bot.position == "long" and bot.base_balance > 0
+        base_amount = quote_amount / price
         order = client.place_market_buy(bot.pair, quote_amount)
         record_trade(
             session,
             bot,
-            trade_type="LIVE-BUY",
+            trade_type="LIVE-DCA-BUY" if is_scale_in else "LIVE-BUY",
             side="BUY",
-            reason="SIGNAL",
+            reason=signal_reason or "SIGNAL",
             price=price,
-            base_amount=quote_amount / price,
+            base_amount=base_amount,
             quote_amount=quote_amount,
             order=order,
         )
+        previous_cost = bot.base_balance * (bot.entry_price or price)
+        bot.base_balance += base_amount
+        bot.quote_balance -= quote_amount
         bot.position = "long"
-        bot.entry_price = price
+        bot.entry_price = (previous_cost + quote_amount) / bot.base_balance if bot.base_balance else price
+        bot.signal = "DCA-BUY" if is_scale_in else "BUY"
         return
 
     if signal == "SELL" and bot.base_balance > 0:

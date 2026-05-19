@@ -20,6 +20,7 @@ from config import (
 )
 from database import utc_now
 from models import Bot, Trade
+from strategy import strategy_preset
 
 
 QUOTE_SUFFIXES = ("USDT", "USDC", "ZAR", "USD", "EUR", "GBP", "BTC", "ETH")
@@ -81,13 +82,15 @@ def create_bot(session, payload: dict[str, Any]) -> Bot:
     pair = str(payload.get("pair") or PAIR).upper().replace("/", "")
     base, quote = pair_currencies(pair)
     starting_capital = float(payload.get("starting_capital") or payload.get("capital") or STARTING_CAPITAL_ZAR)
+    strategy_name = str(payload.get("strategy") or "trend").lower()
+    preset = strategy_preset(strategy_name)
 
     bot = Bot(
         id=str(payload.get("id") or uuid4()),
         name=str(payload.get("name") or f"{pair} Bot")[:120],
         exchange=str(payload.get("exchange") or "valr").lower(),
         pair=pair,
-        strategy=str(payload.get("strategy") or "trend").lower(),
+        strategy=strategy_name,
         mode=normalize_mode(payload.get("mode")),
         status=str(payload.get("status") or "running").lower(),
         base_currency=str(payload.get("base_currency") or base).upper(),
@@ -95,14 +98,14 @@ def create_bot(session, payload: dict[str, Any]) -> Bot:
         starting_capital=starting_capital,
         quote_balance=float(payload.get("quote_balance") or starting_capital),
         base_balance=float(payload.get("base_balance") or 0.0),
-        trade_amount_pct=float(payload.get("trade_amount_pct") or TRADE_AMOUNT_PERCENT),
-        stop_loss_pct=float(payload.get("stop_loss_pct") or payload.get("stoploss", STOP_LOSS_PERCENT)),
-        take_profit_pct=float(payload.get("take_profit_pct") or TAKE_PROFIT_PERCENT),
-        max_position_pct=float(payload.get("max_position_pct") or payload.get("trade_amount_pct") or TRADE_AMOUNT_PERCENT),
+        trade_amount_pct=float(payload.get("trade_amount_pct") or preset["trade_amount_pct"]),
+        stop_loss_pct=float(payload.get("stop_loss_pct") or payload.get("stoploss", preset["stop_loss_pct"])),
+        take_profit_pct=float(payload.get("take_profit_pct") or preset["take_profit_pct"]),
+        max_position_pct=float(payload.get("max_position_pct") or preset["max_position_pct"]),
         max_daily_loss_pct=float(payload.get("max_daily_loss_pct") or 0.05),
         min_quote_to_trade=float(payload.get("min_quote_to_trade") or 50.0),
-        fast_ema_period=int(payload.get("fast_ema_period") or FAST_EMA_PERIOD),
-        slow_ema_period=int(payload.get("slow_ema_period") or SLOW_EMA_PERIOD),
+        fast_ema_period=int(payload.get("fast_ema_period") or preset["fast_ema_period"]),
+        slow_ema_period=int(payload.get("slow_ema_period") or preset["slow_ema_period"]),
         candle_interval=int(payload.get("candle_interval") or CANDLE_INTERVAL),
         candle_limit=int(payload.get("candle_limit") or CANDLE_LIMIT),
         poll_interval_seconds=int(payload.get("poll_interval_seconds") or POLL_INTERVAL_SECONDS),
