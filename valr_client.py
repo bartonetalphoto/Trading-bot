@@ -40,7 +40,7 @@ class ValrClient:
 
     def _get(self, path: str) -> dict:
         headers = self._sign("GET", path)
-        resp    = self.session.get(BASE_URL + path, headers=headers, timeout=10)
+        resp    = self.session.get(BASE_URL + path, headers=headers, timeout=30)
         resp.raise_for_status()
         return resp.json()
 
@@ -48,7 +48,7 @@ class ValrClient:
         import json
         body_str = json.dumps(body)
         headers  = self._sign("POST", path, body_str)
-        resp     = self.session.post(BASE_URL + path, headers=headers, data=body_str, timeout=10)
+        resp     = self.session.post(BASE_URL + path, headers=headers, data=body_str, timeout=30)
         resp.raise_for_status()
         return resp.json()
 
@@ -66,7 +66,7 @@ class ValrClient:
         # Primary: use the public OHLC endpoint
         path = f"/v1/public/{pair}/ohlc"
         params = f"?periodSeconds={interval}&limit={limit}"
-        resp = self.session.get(BASE_URL + path + params, timeout=10)
+        resp = self.session.get(BASE_URL + path + params, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             candles = []
@@ -86,7 +86,7 @@ class ValrClient:
     def _candles_from_ticker(self, pair: str, limit: int) -> list[dict]:
         """Fallback: get recent trade history to build a price series."""
         path = f"/v1/public/{pair}/trades?limit={min(limit, 100)}"
-        resp = self.session.get(BASE_URL + path, timeout=10)
+        resp = self.session.get(BASE_URL + path, timeout=30)
         resp.raise_for_status()
         trades = resp.json()
         return [{"close": float(t["price"]), "timestamp": t["tradedAt"]} for t in trades]
@@ -94,7 +94,7 @@ class ValrClient:
     def get_ticker(self, pair: str) -> dict:
         """Get current best bid/ask and last trade price."""
         path = f"/v1/public/{pair}/markprice"
-        resp = self.session.get(BASE_URL + path, timeout=10)
+        resp = self.session.get(BASE_URL + path, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         return {"last_trade": float(data.get("markPrice", 0))}
